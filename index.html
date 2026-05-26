@@ -724,7 +724,10 @@ function handleSpacePress() {
     line.state='CASTING'; line.hookX=boat.x+42; line.hookY=boat.y-34; line.tension=0;
   } else if (line.state==='HOOKED') {
     line.escapeTimer=0;
-    line.hookY-=14; line.tension+=line.hookedFish.data.struggle;
+    const tipX=boat.x+42;
+    line.hookY-=14;
+    line.hookX+=(tipX-line.hookX)*0.18;
+    line.tension+=line.hookedFish.data.struggle;
     if (line.tension>=tensionCap()) { flashHint('줄 끊어짐! '+line.hookedFish.data.name+' 놓침'); const ef=line.hookedFish; ef.caught=false; ef.fleeing=true; ef.fleeTimer=2; ef.vx=(ef.x<W/2?-1:1)*ef.data.speed*4; line.hookedFish=null; line.state='REELING'; }
     if (line.hookY<=SURFACE_Y) { catchFish(line.hookedFish); line.hookedFish=null; line.state='IDLE'; }
   } else if (line.state==='CASTING') { line.state='REELING'; }
@@ -1122,52 +1125,39 @@ function drawSquid(color) {
   ctx.fillStyle='#000'; ctx.fillRect(-3,-4,1,2); ctx.fillRect(4,-4,1,2);
 }
 function drawManta(color) {
+  // 전체 마름모 날개 실루엣 (머리=오른쪽, 꼬리=왼쪽, 날개=위아래)
   ctx.fillStyle=color;
-  // 윗 날개 (머리=오른쪽, 꼬리=왼쪽)
   ctx.beginPath();
-  ctx.moveTo(22,0);
-  ctx.bezierCurveTo(12,-12,-6,-34,-22,-30);
-  ctx.bezierCurveTo(-34,-22,-28,-8,-18,0);
+  ctx.moveTo(28,0);                              // 머리
+  ctx.bezierCurveTo(22,-14, 6,-56,-14,-52);      // 위날개 앞 경계
+  ctx.bezierCurveTo(-26,-48,-28,-18,-24,0);      // 위날개 뒤 경계
+  ctx.bezierCurveTo(-28,18,-26,48,-14,52);       // 아래날개 뒤 경계
+  ctx.bezierCurveTo(6,56,22,14,28,0);            // 아래날개 앞 경계
   ctx.closePath(); ctx.fill();
-  // 아래 날개
-  ctx.beginPath();
-  ctx.moveTo(22,0);
-  ctx.bezierCurveTo(12,12,-6,34,-22,30);
-  ctx.bezierCurveTo(-34,22,-28,8,-18,0);
-  ctx.closePath(); ctx.fill();
-  // 중앙 몸통
-  ctx.beginPath(); ctx.ellipse(2,0,20,9,0,0,Math.PI*2); ctx.fill();
-  // 꼬리 (채찍형)
-  ctx.strokeStyle=color; ctx.lineWidth=3; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(-18,0); ctx.bezierCurveTo(-28,3,-36,0,-44,10); ctx.stroke();
-  // 머리 cephalic fins (앞으로 뻗은 뿔)
+  // 중앙 두꺼운 몸통 (볼록)
   ctx.fillStyle=color;
-  ctx.beginPath(); ctx.moveTo(20,-2); ctx.bezierCurveTo(26,-8,30,-14,26,-18); ctx.bezierCurveTo(23,-12,21,-8,19,-4); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(20,2); ctx.bezierCurveTo(26,8,30,14,26,18); ctx.bezierCurveTo(23,12,21,8,19,4); ctx.closePath(); ctx.fill();
-  // 신문지 텍스트 줄 (가로 촘촘히)
+  ctx.beginPath(); ctx.ellipse(2,0,22,8,0,0,Math.PI*2); ctx.fill();
+  // 머리 뿔 (cephalic fins)
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.moveTo(22,-2); ctx.bezierCurveTo(28,-10,32,-20,27,-22); ctx.bezierCurveTo(23,-15,20,-8,19,-3); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(22, 2); ctx.bezierCurveTo(28, 10,32, 20,27, 22); ctx.bezierCurveTo(23, 15,20,  8,19,  3); ctx.closePath(); ctx.fill();
+  // 꼬리 채찍
+  ctx.strokeStyle=color; ctx.lineWidth=2.5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-24,0); ctx.bezierCurveTo(-34,3,-46,-1,-54,15); ctx.stroke();
+  // 신문지 줄 (날개 전체에 클립)
   ctx.save();
-  ctx.beginPath(); ctx.ellipse(2,0,20,9,0,0,Math.PI*2); ctx.clip();
-  ctx.strokeStyle='rgba(0,0,0,0.22)'; ctx.lineWidth=1;
-  for(let y=-8;y<=8;y+=2.5){ ctx.beginPath(); ctx.moveTo(-18,y); ctx.lineTo(20,y); ctx.stroke(); }
+  ctx.beginPath();
+  ctx.moveTo(28,0); ctx.bezierCurveTo(22,-14,6,-56,-14,-52); ctx.bezierCurveTo(-26,-48,-28,-18,-24,0); ctx.bezierCurveTo(-28,18,-26,48,-14,52); ctx.bezierCurveTo(6,56,22,14,28,0); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle='rgba(0,0,0,0.13)'; ctx.lineWidth=1.2;
+  for(let y=-50;y<=50;y+=5){ ctx.beginPath(); ctx.moveTo(-26,y); ctx.lineTo(26,y); ctx.stroke(); }
   ctx.restore();
-  // 날개 위 신문지 줄
-  ctx.save();
-  ctx.beginPath(); ctx.moveTo(22,0); ctx.bezierCurveTo(12,-12,-6,-34,-22,-30); ctx.bezierCurveTo(-34,-22,-28,-8,-18,0); ctx.closePath(); ctx.clip();
-  ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.lineWidth=1;
-  for(let y=-28;y<0;y+=4){ ctx.beginPath(); ctx.moveTo(-26,y); ctx.lineTo(20,y); ctx.stroke(); }
-  ctx.restore();
-  // 날개 아래 신문지 줄
-  ctx.save();
-  ctx.beginPath(); ctx.moveTo(22,0); ctx.bezierCurveTo(12,12,-6,34,-22,30); ctx.bezierCurveTo(-34,22,-28,8,-18,0); ctx.closePath(); ctx.clip();
-  ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.lineWidth=1;
-  for(let y=4;y<=28;y+=4){ ctx.beginPath(); ctx.moveTo(-26,y); ctx.lineTo(20,y); ctx.stroke(); }
-  ctx.restore();
-  // 복부 흰 반점
-  ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.beginPath(); ctx.ellipse(4,0,13,6,0,0,Math.PI*2); ctx.fill();
+  // 복부 흰 패치
+  ctx.fillStyle='rgba(255,255,255,0.25)';
+  ctx.beginPath(); ctx.ellipse(4,0,18,7,0,0,Math.PI*2); ctx.fill();
   // 눈
-  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(16,-4,2.5,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(16,-4,1.5,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(17,-5,0.8,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(18,-5,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(18,-5,1.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(19,-6,0.7,0,Math.PI*2); ctx.fill();
 }
 function drawPuffer(color) {
   ctx.fillStyle=color; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
