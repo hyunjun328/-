@@ -1,0 +1,2255 @@
+<!DOCTYPE html>
+<!-- 2D 픽셀 낚시게임 MVP. 단일 파일 실행 가능 (file:// OK) -->
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>괴상한 낚시</title>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #150f1e; color: #e8dfc8; font-family: 'Press Start 2P', monospace; overflow: hidden; }
+  #app { width: 100%; height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 8px; overflow: hidden; gap: 0; }
+  #hud { display: flex; gap: 18px; padding: 8px 14px; background: #1c1628; border: 1px solid #3a2e48; margin-bottom: 8px; font-size: 10px; width: min(1440px, calc((100vh - 100px) * 16 / 9), 96%); max-width: 96%; align-items: center; flex-shrink: 0; }
+  #hud span b { color: #e8c870; }
+  #stage { width: min(1440px, calc((100vh - 100px) * 16 / 9), 96%); max-width: 96%; aspect-ratio: 16/9; position: relative; background: #000; border: 2px solid #3a2e48; flex-shrink: 0; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .panel { position: absolute; inset: 0; background: #120d1c; padding: 16px; overflow-y: auto; display: none; }
+  #panel-aquarium { background: rgba(8,14,22,0.82); backdrop-filter: blur(2px); transition: transform 0.3s ease; }
+  #panel-aquarium.folded { transform: translateY(calc(100% - 46px)); }
+  .panel.active { display: block; }
+  .panel h2 { color: #c89858; margin-bottom: 12px; font-size: 15px; }
+  .panel h3 { color: #6a5878; margin: 16px 0 8px; font-size: 11px; }
+  .aqua-section { margin-bottom: 18px; border: 1px solid #3a2e48; padding: 12px; background: rgba(10,6,20,0.7); }
+  .aqua-section.fresh { border-color: #284038; }
+  .aqua-section h2 { font-size: 12px; margin-bottom: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
+  .card { background: rgba(22,14,38,0.92); border: 2px solid #3a2e48; padding: 10px; display: flex; flex-direction: column; gap: 6px; font-size: 9px; height: 240px; overflow: hidden; }
+  .card .name { color: #e8c870; font-size: 11px; flex-shrink: 0; }
+  .card .meta { color: #7a6880; font-size: 9px; line-height: 1.6; flex-shrink: 0; }
+  .card .flavor { color: #7a6880; font-size: 9px; line-height: 1.6; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .back-btn { padding: 8px 12px; background: #3c2858; color: #e8dfc8; border: 2px solid #5040a0; cursor: pointer; font-family: inherit; font-size: 10px; margin-bottom: 14px; display: inline-block; }
+  .back-btn:hover { background: #5a40a0; }
+  .card canvas { width: 56px; height: 56px; background: #0e0a18; align-self: center; image-rendering: pixelated; }
+  .card button { padding: 7px 8px; background: #3c2858; color: #e8dfc8; border: 2px solid #5040a0; cursor: pointer; font-family: inherit; font-size: 9px; margin-top: auto; }
+  .card button:hover { background: #5a40a0; }
+  .card button.danger { background: #581828; border-color: #a03040; }
+  .card button.danger:hover { background: #982030; }
+  .card button:disabled { background: #201828; color: #4a3858; border-color: #2e2040; cursor: not-allowed; }
+  .empty { color: #3a2e48; font-style: italic; padding: 12px; font-size: 9px; }
+  #touch-controls { display:none; position:absolute; bottom:14px; left:0; right:0; pointer-events:none; z-index:20; justify-content:space-between; align-items:flex-end; padding:0 16px; }
+  @media (pointer:coarse) { #touch-controls { display:flex; } }
+  .touch-btn-group { display:flex; gap:12px; pointer-events:all; }
+  .touch-btn { pointer-events:all; width:68px; height:68px; background:rgba(40,20,60,0.55); border:2px solid rgba(140,100,220,0.45); border-radius:50%; color:#e8dfc8; font-size:26px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:inherit; -webkit-tap-highlight-color:transparent; user-select:none; touch-action:none; }
+  .touch-btn:active { background:rgba(80,40,120,0.75); }
+  .touch-btn-action { width:84px; height:84px; font-size:36px; background:rgba(60,20,90,0.6); border-color:rgba(180,120,255,0.6); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="hud">
+    <span>골드 <b id="hud-gold">0</b></span>
+    <span>깊이 <b id="hud-depth">0</b>m</span>
+    <span>인벤 <b id="hud-inv">0/5</b></span>
+    <span>상태 <b id="hud-state">대기</b></span>
+    <span>낚싯대 <b id="hud-rod">Lv.0</b></span>
+    <button id="btn-mute" onclick="toggleMute()" style="margin-left:auto;padding:4px 8px;background:#1c1628;color:#e8dfc8;border:1px solid #3a2e48;cursor:pointer;font-family:inherit;font-size:9px;">♪ ON</button>
+  </div>
+  <div id="stage">
+    <canvas id="game" width="1600" height="900"></canvas>
+    <div id="touch-controls">
+      <div class="touch-btn-group">
+        <button id="touch-left" class="touch-btn">◀</button>
+        <button id="touch-right" class="touch-btn">▶</button>
+      </div>
+      <button id="touch-space" class="touch-btn touch-btn-action">●</button>
+    </div>
+    <button id="btn-guide" onclick="toggleGuide()" style="display:none;position:absolute;top:8px;right:8px;padding:5px 10px;background:#1c1628;color:#e8c870;border:1px solid #5040a0;cursor:pointer;font-family:inherit;font-size:9px;">? 안내판</button>
+    <div class="panel" id="panel-aquarium">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+        <button class="back-btn" onclick="backToHarbor()" style="margin-bottom:0">← 항구로</button>
+        <button class="back-btn" id="btn-aqua-sea" onclick="setAquaTab('sea')" style="margin-bottom:0;background:#1c3a78;border-color:#4888e8;">🌊 바다</button>
+        <button class="back-btn" id="btn-aqua-fresh" onclick="setAquaTab('fresh')" style="margin-bottom:0;">🌿 민물</button>
+        <button class="back-btn" id="btn-aqua-fold" onclick="toggleAquaPanel()" style="margin-bottom:0;margin-left:auto;">▼ 접기</button>
+      </div>
+      <div id="aqua-panel-body">
+        <div id="aqua-tab-sea">
+          <div class="aqua-section">
+            <h2>🌊 바다 수족관 (<span id="aqua-sea-count">0</span>/<span id="aqua-sea-cap">6</span>) · <span id="aqua-sea-income">0</span>G/h</h2>
+            <p style="color:#888;font-size:11px;margin-bottom:6px">바다 물고기만 입주 가능. 시간당 골드 수익.</p>
+            <div class="grid" id="aqua-sea-list"></div>
+          </div>
+        </div>
+        <div id="aqua-tab-fresh" style="display:none">
+          <div class="aqua-section fresh">
+            <h2>🌿 민물 수족관 (<span id="aqua-fresh-count">0</span>/<span id="aqua-fresh-cap">6</span>) · <span id="aqua-fresh-income">0</span>G/h</h2>
+            <p style="color:#888;font-size:11px;margin-bottom:6px">민물 물고기만 입주 가능. 시간당 골드 수익.</p>
+            <div class="grid" id="aqua-fresh-list"></div>
+          </div>
+        </div>
+        <h3>인벤토리에서 옮기기</h3>
+        <div class="grid" id="aqua-inv"></div>
+      </div>
+    </div>
+    <div class="panel" id="panel-encyclopedia">
+      <button class="back-btn" onclick="backToHarbor()">← 항구로</button>
+      <h2>도감</h2>
+      <p style="color:#888;font-size:12px;margin-bottom:8px">🌊 바다 · 🌿 민물 어종 전부 수집하세요.</p>
+      <div class="grid" id="encyclopedia-list"></div>
+    </div>
+    <div class="panel" id="panel-shop">
+      <button class="back-btn" onclick="backToHarbor()">← 항구로</button>
+      <h2>상점</h2>
+      <h3>판매 (인벤토리)</h3>
+      <div class="grid" id="shop-inv"></div>
+      <h3>업그레이드</h3>
+      <div class="grid" id="shop-upgrades"></div>
+      <h3>위험 구역</h3>
+      <div class="grid"><div class="card">
+        <span class="name">전체 초기화</span>
+        <span class="meta">모든 진행 삭제</span>
+        <button class="danger" id="btn-reset">초기화</button>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const W = 1600, H = 900, SURFACE_Y = 160;
+const SAVE_KEY = 'fishingGame.v4';
+
+// ========== 물고기 데이터 ==========
+const FISH_DB = [
+  // 바다
+  { id:'denture_shark',    name:'틀니상어',       loc:'sea',   tier:1, depth:[180,340], speed:55, struggle:9,  price:18,  minRod:0, color:'#b8b8b8', shape:'shark',
+    flavor:'이빨 빠지면 잇몸으로 문다. 더 아프다.' },
+  { id:'hairy_octopus',    name:'숱많은 문어',     loc:'sea',   tier:1, depth:[200,360], speed:35, struggle:7,  price:14,  minRod:0, color:'#7a3f1a', shape:'octopus',
+    flavor:'가르마가 일정하다. 자존심이 있음.' },
+  { id:'bread_jelly',      name:'식빵해파리',       loc:'sea',   tier:1, depth:[160,280], speed:25, struggle:4,  price:9,   minRod:0, color:'#d4a76a', shape:'jelly',
+    flavor:'살짝 토스트되어 있음. 버터향.' },
+  { id:'bubble_bass',      name:'참치마요',         loc:'sea',   tier:2, depth:[300,540], speed:30, struggle:6,  price:38,  minRod:1, color:'#ffd166', shape:'bass',
+    flavor:'노란 배 위에 마요 한 줄. 이 깊이에 왜 있지.' },
+  { id:'jazz_eel',         name:'재즈 뱀장어',      loc:'sea',   tier:1, depth:[160,320], speed:62, struggle:5,  price:11,  minRod:0, color:'#4d8a7a', shape:'eel',
+    flavor:'리듬 타다가 S자 됐음. 트럼펫은 잃어버림.' },
+  { id:'socks_squid',      name:'양말한짝 오징어',  loc:'sea',   tier:2, depth:[220,420], speed:45, struggle:6,  price:24,  minRod:0, color:'#9d5bba', shape:'squid',
+    flavor:'한쪽 발만 남겨놓고 사라짐. 셔플 신발 노래.' },
+  { id:'melon_manta',      name:'신문지 가오리',    loc:'sea',   tier:2, depth:[320,560], speed:18, struggle:8,  price:28,  minRod:0, color:'#5aa864', shape:'manta',
+    flavor:'납작하게 펼쳐져서 날아다님. 날개짓이 펄럭펄럭.' },
+  { id:'delivery_crab',    name:'가위손 게',        loc:'sea',   tier:2, depth:[120,240], speed:20, struggle:4,  price:26,  minRod:0, color:'#d4623a', shape:'crab',
+    flavor:'집게가 너무 날카로워서 본인도 무서워함.' },
+  { id:'night_shrimp',     name:'새우깡',           loc:'sea',   tier:2, depth:[280,480], speed:52, struggle:6,  price:22,  minRod:0, color:'#e08870', shape:'shrimp',
+    flavor:'주황색 구부러진 몸통. 과자랑 구분이 안 됨.' },
+  { id:'puffer_punk',      name:'폭탄 복어',        loc:'sea',   tier:3, depth:[280,520], speed:20, struggle:12, price:34,  minRod:1, color:'#f4d03f', shape:'puffer',
+    flavor:'건드리면 터짐. 본인도 알고 있음.' },
+  { id:'laser_turtle',     name:'레이저 거북',      loc:'sea',   tier:3, depth:[360,620], speed:20, struggle:10, price:40,  minRod:1, color:'#4da6ff', shape:'turtle',
+    flavor:'등껍질에서 레이저를 쏘면 고장 난 카메라 같음.' },
+  { id:'diet_whale',       name:'다이어트 고래',    loc:'sea',   tier:3, depth:[400,680], speed:14, struggle:16, price:48,  minRod:2, color:'#6a9fc0', shape:'whale',
+    flavor:'유일한 간식은 크릴새우 1개. 의지의 고래.' },
+  { id:'lantern_angler',   name:'등불 아귀',        loc:'sea',   tier:4, depth:[560,860], speed:11, struggle:20, price:85,  minRod:3, color:'#2d3a5a', shape:'anglerfish',
+    flavor:'등불을 달고 아직도 손님을 기다린다. 심해 포차.' },
+  { id:'kraken',           name:'크라켄',           loc:'sea',   tier:5, depth:[700,900], speed:8,  struggle:28, price:220, minRod:4, color:'#1a0a2e', shape:'kraken',
+    flavor:'전설이라 이름 붙인 사람도 못 잡아봤다.' },
+
+  // 민물
+  { id:'sleepy_catfish',   name:'칼국수 메기',      loc:'fresh', tier:1, depth:[120,260], speed:28, struggle:6,  price:13,  minRod:0, color:'#7a6a40', shape:'catfish',
+    flavor:'수염이 네 가닥 늘어짐. 면발 같다는 말을 들은 적 있음.' },
+  { id:'red_piranha',      name:'부정교합 피라냐',  loc:'fresh', tier:1, depth:[160,300], speed:72, struggle:9,  price:16,  minRod:0, color:'#cc3333', shape:'piranha',
+    flavor:'아래턱이 앞으로 튀어나옴. 교정기 맞춰야 함.' },
+  { id:'karaoke_carp',     name:'노래방 잉어',      loc:'fresh', tier:2, depth:[200,380], speed:22, struggle:7,  price:25,  minRod:0, color:'#f5a623', shape:'carp',
+    flavor:'마이크를 손에서 절대 놓지 않는다. 18번: 아리랑.' },
+  { id:'tweezers_cray',    name:'핀셋 가재',        loc:'fresh', tier:2, depth:[140,280], speed:18, struggle:5,  price:30,  minRod:0, color:'#8b1a1a', shape:'crayfish',
+    flavor:'집게가 너무 정밀해서 외과의 한 명이 제자로 삼으려 했다.' },
+  { id:'limited_sturgeon', name:'한정판 철갑상어',  loc:'fresh', tier:3, depth:[380,660], speed:16, struggle:15, price:55,  minRod:2, color:'#5a5a7a', shape:'sturgeon',
+    flavor:'등에 한정판 스티커 붙어있음. 박물관 소장품 수준.' },
+  { id:'pastlife_salmon',  name:'거꾸로 강을 거슬러 오르는 힘찬 연어', loc:'fresh', tier:4, depth:[500,780], speed:14, struggle:19, price:80,  minRod:3, color:'#d4804a', shape:'salmon',
+    flavor:'제목이 곧 정체성. 멈추면 죽는다.' },
+
+  // 바다 신규
+  { id:'clownfish',    name:'니모',          loc:'sea',   tier:1, depth:[200,460], speed:40, struggle:4,  price:10,  minRod:0, color:'#ff6a00', shape:'clownfish',  bottom:true,
+    flavor:'아빠 잃은 트라우마가 있다. 말 걸지 말 것.' },
+  { id:'jellycold',    name:'해파리냉채',     loc:'sea',   tier:1, depth:[140,280], speed:20, struggle:3,  price:8,   minRod:0, color:'#a8d8ea', shape:'jellycold',
+    flavor:'냉채 소스 뿌려져 있음. 오이도 있음.' },
+  { id:'moray',        name:'골치아픈 곰치', loc:'sea',   tier:1, depth:[200,380], speed:55, struggle:8,  price:15,  minRod:0, color:'#4a7a2a', shape:'moray',
+    flavor:'얼굴이 항상 화가 나 있음. 이유는 없음.' },
+  { id:'flyingfish',   name:'날치기',        loc:'sea',   tier:1, depth:[160,260], speed:70, struggle:5,  price:13,  minRod:0, color:'#5588cc', shape:'flyingfish',
+    flavor:'수면 위로 날아가 지갑을 가져감. 신고해야 함.' },
+  { id:'flatfish',     name:'넙치',          loc:'sea',   tier:1, depth:[120,220], speed:15, struggle:6,  price:14,  minRod:0, color:'#b8a060', shape:'flatfish',  bottom:true,
+    flavor:'눈이 한쪽으로 쏠려있음. 바닥에만 있어서 그럼.' },
+  { id:'rockfish',     name:'왜 우럭?',      loc:'sea',   tier:1, depth:[180,340], speed:25, struggle:7,  price:16,  minRod:0, color:'#8a6050', shape:'rockfish',
+    flavor:'항상 울고 있음. 이유를 물어보면 더 욺.' },
+  { id:'sunfish',      name:'돌연사개복치',  loc:'sea',   tier:2, depth:[300,520], speed:10, struggle:14, price:35,  minRod:1, color:'#c8c8c8', shape:'sunfish',
+    flavor:'헤엄치다가 가끔 그냥 쓰러짐. 이유 불명.' },
+  { id:'mermaid',      name:'인어공주',      loc:'sea',   tier:3, depth:[440,700], speed:28, struggle:12, price:60,  minRod:2, color:'#5a8a9a', shape:'mermaid',
+    flavor:'목소리를 팔았다. 지금은 손짓으로 소통함.' },
+  { id:'rainbowdolphin',name:'무지개돌고래', loc:'sea',   tier:3, depth:[380,620], speed:48, struggle:11, price:65,  minRod:2, color:'#ff88cc', shape:'rainbowdolphin',
+    flavor:'점프할 때 프리즘을 통과함. 설명 불가.' },
+  { id:'spongebob',    name:'스펀지밥',      loc:'sea',   tier:4, depth:[640,880], speed:12, struggle:16, price:120, minRod:3, color:'#ffe033', shape:'spongebob',  bottom:true,
+    flavor:'바닥에 살면서 집도 짓고 요리도 함. 직원임.' },
+  { id:'patrick',      name:'뚱이',          loc:'sea',   tier:4, depth:[640,880], speed:8,  struggle:10, price:100, minRod:3, color:'#ff9999', shape:'patrick',   bottom:true,
+    flavor:'그냥 바위 밑에 잠. 포획하기 민망함.' },
+  { id:'bluewhale',    name:'흰수염고래',    loc:'sea',   tier:5, depth:[700,900], speed:6,  struggle:30, price:300, minRod:4, color:'#334a6a', shape:'bluewhale',
+    flavor:'지구에서 제일 크다. 낚싯대가 부러질 것 같다.' },
+
+  // 민물 신규
+  { id:'plainbass',    name:'그냥배스',      loc:'fresh', tier:1, depth:[120,240], speed:42, struggle:6,  price:11,  minRod:0, color:'#5a7a40', shape:'plainbass',
+    flavor:'딱히 특징 없음. 그냥 배스임.' },
+  { id:'bluegill',     name:'그냥블루길',    loc:'fresh', tier:1, depth:[100,220], speed:38, struggle:5,  price:10,  minRod:0, color:'#4466aa', shape:'bluegill',
+    flavor:'파란 아가미가 있음. 본인은 그게 포인트라고 함.' },
+  { id:'minnow',       name:'그냥피라미',    loc:'fresh', tier:1, depth:[100,200], speed:60, struggle:3,  price:7,   minRod:0, color:'#a0b880', shape:'minnow',
+    flavor:'무리 지어 다님. 혼자 있으면 불안해함.' },
+  { id:'mullet',       name:'숭한 숭어',     loc:'fresh', tier:1, depth:[120,260], speed:35, struggle:7,  price:12,  minRod:0, color:'#607898', shape:'mullet',
+    flavor:'생긴 게 좀 숭해. 본인은 모름.' },
+  { id:'goldfish',     name:'금붕어',        loc:'fresh', tier:1, depth:[100,180], speed:22, struggle:2,  price:6,   minRod:0, color:'#ff8830', shape:'goldfish',
+    flavor:'작고 귀여움. 기억력이 3초라고 알려졌으나 사실임.' },
+  { id:'trout',        name:'송어',          loc:'fresh', tier:2, depth:[200,380], speed:45, struggle:8,  price:22,  minRod:0, color:'#7a9060', shape:'trout',
+    flavor:'점박이 무늬가 있음. 회로 먹으면 맛있음.' },
+  { id:'snakehead',    name:'가물가물가물치', loc:'fresh', tier:2, depth:[160,320], speed:30, struggle:11, price:28,  minRod:0, color:'#3a4a2a', shape:'snakehead',
+    flavor:'가물가물 기억이 날 듯 말 듯. 나쁜 녀석임.' },
+  { id:'breadfishred', name:'팥붕어빵',      loc:'fresh', tier:3, depth:[340,580], speed:20, struggle:9,  price:45,  minRod:1, color:'#c8721a', shape:'breadfishred',
+    flavor:'팥소가 가득. 겨울에만 나와야 하는데 왜 여기 있음.' },
+  { id:'breadfishcream',name:'슈크림붕어빵', loc:'fresh', tier:3, depth:[340,580], speed:18, struggle:8,  price:42,  minRod:1, color:'#e8a030', shape:'breadfishcream',
+    flavor:'슈크림이 넘칠 것 같음. 입 크게 벌려야 함.' },
+  { id:'giantmudfish', name:'미꾸쓰리엑스라지', loc:'fresh', tier:3, depth:[300,540], speed:25, struggle:14, price:50, minRod:1, color:'#6a5030', shape:'giantmudfish',
+    flavor:'일반 미꾸라지의 5배. 낚여도 본인이 더 당황함.' },
+  { id:'goldencarp',   name:'행운의황금잉어', loc:'fresh', tier:5, depth:[700,900], speed:9,  struggle:26, price:250, minRod:4, color:'#ffd700', shape:'goldencarp',
+    flavor:'잡으면 소원 하나 들어줌. 단, 금전적인 소원 한정.' },
+];
+const FISH_BY_ID = Object.fromEntries(FISH_DB.map(f => [f.id, f]));
+
+const UPGRADES = {
+  rod:        { name:'낚싯대',      desc:'최대 깊이 +120m · 고등급 도달', baseCost:50,  scale:2.2 },
+  reel:       { name:'릴',          desc:'텐션 한도 +20',                  baseCost:60,  scale:2   },
+  bait:       { name:'미끼',        desc:'희귀어 확률 +',                  baseCost:80,  scale:2   },
+  aqua_sea:   { name:'바다 수족관', desc:'슬롯 +3',                        baseCost:100, scale:2   },
+  aqua_fresh: { name:'민물 수족관', desc:'슬롯 +3',                        baseCost:100, scale:2   },
+  boat:       { name:'배',          desc:'속도 +30 · 인벤토리 +2',         baseCost:180, scale:2.5 },
+};
+
+// ========== 상태 ==========
+const defaultState = () => ({
+  gold:0, inventory:[], aquarium_sea:[], aquarium_fresh:[],
+  seenFish:[], upgrades:{rod:0,reel:0,bait:0,aqua_sea:0,aqua_fresh:0,boat:0},
+  freshUnlocked:false,
+  lastTick:Date.now(), nextInstId:1
+});
+let state = loadState();
+function loadState() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    if (!raw) return defaultState();
+    const s = JSON.parse(raw), d = defaultState();
+    const ups = {...d.upgrades,...(s.upgrades||{})};
+    // 구버전 inv_cap → boat 마이그레이션
+    if ((s.upgrades||{}).inv_cap && !ups.boat) ups.boat = s.upgrades.inv_cap;
+    const loaded = {...d,...s, upgrades:ups};
+    // 기존 세이브 = freshUnlocked 이미 true 처리
+    if (s.freshUnlocked === undefined) loaded.freshUnlocked = true;
+    return loaded;
+  } catch(e) { return defaultState(); }
+}
+function saveState() { state.lastTick = Date.now(); localStorage.setItem(SAVE_KEY, JSON.stringify(state)); }
+function resetState() { localStorage.removeItem(SAVE_KEY); location.reload(); }
+
+function maxDepth()      { return 340 + state.upgrades.rod * 120; }
+function tensionCap()    { return 100 + state.upgrades.reel * 20; }
+function seaAquaCap()    { return 6 + (state.upgrades.aqua_sea||0) * 3; }
+function freshAquaCap()  { return 6 + (state.upgrades.aqua_fresh||0) * 3; }
+function inventoryCap()  { return 5 + (state.upgrades.boat||0)*2; }
+function boatSpeed()     { return 280 + (state.upgrades.boat||0)*30; }
+function baitBias()      { return state.upgrades.bait * 0.1; }
+function upgradeCost(k)  { const u = UPGRADES[k]; return Math.floor(u.baseCost * Math.pow(u.scale, state.upgrades[k]||0)); }
+
+function weightedChoice(list, wfn) {
+  const total = list.reduce((s,i) => s+wfn(i), 0);
+  if (total <= 0) return list[0];
+  let r = Math.random() * total;
+  for (const item of list) { r -= wfn(item); if (r <= 0) return item; }
+  return list[list.length-1];
+}
+
+// ========== 캔버스 / 입력 ==========
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+let fontScale = 1;
+function updateFontScale() { const cw=canvas.clientWidth||1600; fontScale=Math.min(4.0,Math.max(1.0,1600/cw)); }
+function fz(px) { return Math.round(px*fontScale); }
+window.addEventListener('resize', updateFontScale);
+const keys = {};
+let weather=null, gameTime=0;
+let currentLoc = 'sea';
+
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code==='Space') { e.preventDefault(); handleSpacePress(); }
+  if (locationSelectMode) {
+    if (e.code==='ArrowLeft'||e.code==='KeyA') locationSelectChoice='sea';
+    if (e.code==='ArrowRight'||e.code==='KeyD') locationSelectChoice='fresh';
+  }
+});
+window.addEventListener('keyup', e => { keys[e.code]=false; });
+
+function setupTouch() {
+  const bind = (id, code) => {
+    const el = document.getElementById(id); if (!el) return;
+    el.addEventListener('touchstart', e => { e.preventDefault(); startBgm(); keys[code]=true; if(code==='Space') handleSpacePress(); }, {passive:false});
+    el.addEventListener('touchend',   e => { e.preventDefault(); keys[code]=false; }, {passive:false});
+    el.addEventListener('touchcancel',() => { keys[code]=false; });
+  };
+  bind('touch-left',  'ArrowLeft');
+  bind('touch-right', 'ArrowRight');
+  bind('touch-space', 'Space');
+}
+setupTouch();
+
+// ========== 엔티티 ==========
+const boat = { x:W/2, y:SURFACE_Y-30, speed:280 };
+const line = { state:'IDLE', hookX:W/2, hookY:SURFACE_Y, descendSpeed:180, tension:0, hookedFish:null, escapeTimer:0 };
+const fishes = [];
+const MAX_FISH = 7;
+let firstCatchAnim = null;
+
+// ========== 보물상자 ==========
+const chests = [];
+const CHEST_REWARDS = [{gold:100,w:50},{gold:300,w:30},{gold:500,w:15},{gold:1000,w:5}];
+function spawnChest() {
+  if (chests.length >= 2) return;
+  chests.push({ x: 120 + Math.random()*(W-240), y: SURFACE_Y + maxDepth() - 12 });
+}
+function updateChests(dt) {
+  if (chests.length < 2 && Math.random() < 0.0002) spawnChest();
+}
+function checkChestCollision() {
+  for (let i=chests.length-1;i>=0;i--) {
+    const c=chests[i];
+    const dx=c.x-line.hookX, dy=c.y-line.hookY;
+    if (dx*dx+dy*dy < 36*36) {
+      const total=CHEST_REWARDS.reduce((s,r)=>s+r.w,0);
+      let rnd=Math.random()*total;
+      const reward=CHEST_REWARDS.find(r=>{rnd-=r.w;return rnd<=0;})||CHEST_REWARDS[0];
+      state.gold+=reward.gold;
+      flashHint(`보물상자 발견! +${reward.gold}G ✦`);
+      chests.splice(i,1);
+      saveState(); updateHUD();
+      line.state='REELING';
+      return;
+    }
+  }
+}
+function drawChests() {
+  for (const c of chests) {
+    const sy=toSY(c.y);
+    const glow=0.12+0.08*Math.sin(gameTime*3);
+    ctx.fillStyle=`rgba(255,210,40,${glow})`; ctx.beginPath(); ctx.arc(c.x,sy,32,0,Math.PI*2); ctx.fill();
+    // 몸통
+    ctx.fillStyle='#7a3a10'; ctx.fillRect(c.x-16,sy-10,32,16);
+    ctx.fillStyle='#9b4e18'; ctx.fillRect(c.x-15,sy-9,30,14);
+    // 뚜껑
+    ctx.fillStyle='#9b4e18'; ctx.fillRect(c.x-16,sy-18,32,10);
+    ctx.fillStyle='#b05e20'; ctx.fillRect(c.x-15,sy-17,30,8);
+    // 금속 띠
+    ctx.fillStyle='#d4a020';
+    ctx.fillRect(c.x-17,sy-11,34,4);
+    ctx.fillRect(c.x-3,sy-18,6,22);
+    // 자물쇠
+    ctx.fillStyle='#d4a020'; ctx.fillRect(c.x-5,sy-5,10,8);
+    ctx.fillStyle='#2a1a08'; ctx.beginPath(); ctx.arc(c.x,sy-1,2.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#d4a020'; ctx.beginPath(); ctx.arc(c.x,sy-5,3,Math.PI,0); ctx.stroke();
+  }
+}
+
+function updateFirstCatch(dt) {
+  if (!firstCatchAnim) return;
+  firstCatchAnim.timer -= dt;
+  for (const p of firstCatchAnim.parts) {
+    p.x += p.vx*dt; p.y += p.vy*dt;
+    p.vy += 200*dt; // 중력
+    p.life -= dt*0.45;
+  }
+  if (firstCatchAnim.timer <= 0) firstCatchAnim = null;
+}
+function drawFirstCatch() {
+  if (!firstCatchAnim) return;
+  const t = firstCatchAnim.timer;
+  const alpha = Math.min(1, t * 0.8);
+  // 어두운 오버레이
+  ctx.fillStyle=`rgba(0,0,0,${0.55*alpha})`; ctx.fillRect(0,0,W,H);
+  // 파티클
+  for (const p of firstCatchAnim.parts) {
+    if (p.life<=0) continue;
+    ctx.globalAlpha = p.life * alpha;
+    ctx.fillStyle = p.col;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = alpha;
+  // 중앙 물고기 크게
+  const scale = 1 + 0.3*Math.sin(gameTime*6);
+  ctx.save(); ctx.translate(W/2, H/2-60); ctx.scale(scale*5, scale*5);
+  drawShape(firstCatchAnim.fish.shape, firstCatchAnim.fish.color);
+  ctx.restore();
+  // 텍스트
+  ctx.textAlign='center';
+  ctx.fillStyle='#ffe070'; ctx.font=`bold ${fz(38)}px 'Press Start 2P',monospace`;
+  ctx.shadowColor='#ff8800'; ctx.shadowBlur=24;
+  ctx.fillText('★ 최초 발견! ★', W/2, H/2+60);
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#ffffff'; ctx.font=`${fz(22)}px 'Press Start 2P',monospace`;
+  ctx.fillText(firstCatchAnim.fish.name, W/2, H/2+100);
+  ctx.fillStyle='#c8a84a'; ctx.font=`${fz(14)}px 'Press Start 2P',monospace`;
+  ctx.fillText(`도감에 등록되었습니다`, W/2, H/2+130);
+  ctx.textAlign='left';
+  ctx.globalAlpha=1;
+}
+
+// ========== 항구 ==========
+let harborMode = false;
+let showHarborGuide = true;
+let locationSelectMode = false;
+let locationSelectChoice = 'sea';
+const harborPlayer = { x: 150 };
+const HARBOR_BUILDINGS = [
+  { x: 480,  label: '수족관', tab: 'aquarium'    },
+  { x: 900,  label: '상점',   tab: 'shop'        },
+  { x: 1320, label: '도감',   tab: 'encyclopedia'},
+];
+
+function enterHarbor() {
+  harborMode = true; harborPlayer.x = 150;
+  ['aquarium','encyclopedia','shop'].forEach(p=>document.getElementById('panel-'+p).classList.remove('active'));
+  document.getElementById('btn-guide').style.display='block';
+}
+function exitHarbor() {
+  harborMode = false; locationSelectMode = false;
+  document.getElementById('btn-guide').style.display='none';
+  switchTab(currentLoc);
+}
+function toggleGuide() { showHarborGuide = !showHarborGuide; document.getElementById('btn-guide').textContent = showHarborGuide ? '? 안내판 끄기' : '? 안내판 켜기'; }
+function toggleAquaPanel() {
+  const p = document.getElementById('panel-aquarium');
+  const folded = p.classList.toggle('folded');
+  document.getElementById('btn-aqua-fold').textContent = folded ? '▲ 펼치기' : '▼ 접기';
+}
+function setAquaTab(t) {
+  document.getElementById('aqua-tab-sea').style.display   = t==='sea'   ? 'block' : 'none';
+  document.getElementById('aqua-tab-fresh').style.display = t==='fresh' ? 'block' : 'none';
+  document.getElementById('btn-aqua-sea').style.background   = t==='sea'   ? '#1c3a78' : '';
+  document.getElementById('btn-aqua-sea').style.borderColor  = t==='sea'   ? '#4888e8' : '';
+  document.getElementById('btn-aqua-fresh').style.background = t==='fresh' ? '#163a28' : '';
+  document.getElementById('btn-aqua-fresh').style.borderColor= t==='fresh' ? '#48c888' : '';
+}
+function handleHarborSpace() {
+  if (harborPlayer.x <= 130) {
+    if (!locationSelectMode) {
+      locationSelectMode = true;
+      locationSelectChoice = currentLoc;
+    } else {
+      if (locationSelectChoice==='fresh' && !state.freshUnlocked) {
+        flashHint(`민물 잠금 해제 조건: 골드 10,000원 (현재 ${Math.floor(state.gold)}원)`);
+        locationSelectChoice='sea';
+        return;
+      }
+      const prevLoc = currentLoc;
+      currentLoc = locationSelectChoice;
+      locationSelectMode = false;
+      if (currentLoc !== prevLoc) { fishes.length=0; chests.length=0; for(let i=0;i<6;i++) spawnFish(); }
+      exitHarbor();
+    }
+    return;
+  }
+  locationSelectMode = false;
+  for (const b of HARBOR_BUILDINGS) {
+    if (Math.abs(harborPlayer.x - b.x) < 90) { switchTab(b.tab); return; }
+  }
+}
+function updateHarborPlayer(dt) {
+  if (!harborMode) return;
+  if (locationSelectMode) return;
+  if (keys['ArrowLeft']||keys['KeyA']) harborPlayer.x -= 300*dt;
+  if (keys['ArrowRight']||keys['KeyD']) harborPlayer.x += 300*dt;
+  harborPlayer.x = Math.max(30, Math.min(W-30, harborPlayer.x));
+}
+function drawHarbor() {
+  const hSky=ctx.createLinearGradient(0,0,0,H);
+  hSky.addColorStop(0,'#0e0818'); hSky.addColorStop(0.5,'#2a1040'); hSky.addColorStop(1,'#5a2040');
+  ctx.fillStyle=hSky; ctx.fillRect(0,0,W,H);
+  const sunG=ctx.createRadialGradient(W/2,H,0,W/2,H,520);
+  sunG.addColorStop(0,'rgba(255,160,40,0.35)'); sunG.addColorStop(1,'rgba(255,80,0,0)');
+  ctx.fillStyle=sunG; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,240,200,0.55)';
+  for(let i=0;i<40;i++){ctx.fillRect(((i*397)%W),((i*173)%200),2,2);}
+  const hSea=ctx.createLinearGradient(0,H-280,0,H);
+  hSea.addColorStop(0,'#1a2850'); hSea.addColorStop(1,'#04060e');
+  ctx.fillStyle=hSea; ctx.fillRect(0,H-280,W,280);
+  ctx.fillStyle='rgba(180,120,60,0.3)'; ctx.fillRect(0,H-283,W,4);
+  ctx.fillStyle='#2a2018'; ctx.fillRect(0,H-200,W,200);
+  ctx.fillStyle='#1e160e'; ctx.fillRect(0,H-204,W,4);
+  ctx.strokeStyle='#181008'; ctx.lineWidth=2;
+  for(let i=0;i<W;i+=48){ctx.beginPath();ctx.moveTo(i,H-200);ctx.lineTo(i,H);ctx.stroke();}
+  ctx.beginPath();ctx.moveTo(0,H-160);ctx.lineTo(W,H-160);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,H-100);ctx.lineTo(W,H-100);ctx.stroke();
+  // 낚시터 팻말 (항구 좌측)
+  const _hg=0.55+0.45*Math.sin(gameTime*2.2);
+  ctx.fillStyle='#6b4520'; ctx.fillRect(168,H-370,8,170);
+  ctx.fillStyle='#b07828'; ctx.fillRect(28,H-394,180,56);
+  ctx.fillStyle='#8a5a1a'; ctx.fillRect(28,H-394,180,5); ctx.fillRect(28,H-343,180,5);
+  ctx.strokeStyle=`rgba(255,220,80,${_hg})`; ctx.lineWidth=2;
+  ctx.strokeRect(30,H-391,176,50);
+  ctx.fillStyle='#110a04'; ctx.fillRect(32,H-389,172,46);
+  ctx.fillStyle='#ffe070'; ctx.font=`${fz(18)}px 'Press Start 2P',monospace`; ctx.textAlign='center';
+  ctx.shadowColor='#ffcc00'; ctx.shadowBlur=8*_hg;
+  ctx.fillText('← 낚시터', 118, H-364);
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#c8a84a'; ctx.font=`${fz(11)}px 'Press Start 2P',monospace`;
+  ctx.fillText('좌측끝+Space', 118, H-347);
+  ctx.textAlign='left';
+  for(let lx=200;lx<W;lx+=400){
+    ctx.fillStyle='#3a2a18'; ctx.fillRect(lx-4,H-360,8,160);
+    ctx.fillStyle='#e8c870'; ctx.shadowColor='#e8c870'; ctx.shadowBlur=18;
+    ctx.beginPath();ctx.arc(lx,H-365,8,0,Math.PI*2);ctx.fill(); ctx.shadowBlur=0;
+    const cone=ctx.createRadialGradient(lx,H-360,0,lx,H-360,100);
+    cone.addColorStop(0,'rgba(232,200,112,0.12)'); cone.addColorStop(1,'rgba(232,200,112,0)');
+    ctx.fillStyle=cone; ctx.beginPath();ctx.moveTo(lx,H-360);ctx.arc(lx,H-360,100,Math.PI*0.28,Math.PI*0.72);ctx.closePath();ctx.fill();
+  }
+  for (const b of HARBOR_BUILDINGS) {
+    const near=Math.abs(harborPlayer.x-b.x)<90;
+    ctx.fillStyle='rgba(0,0,0,0.25)'; ctx.fillRect(b.x-72,H-198,144,8);
+    ctx.fillStyle=near?'#3c2850':'#241820'; ctx.fillRect(b.x-70,H-380,140,180);
+    ctx.strokeStyle=near?'#5a3870':'#2e1c26'; ctx.lineWidth=1;
+    for(let by2=H-380;by2<H-200;by2+=16){
+      for(let bx2=b.x-70;bx2<b.x+70;bx2+=30){
+        const off=(Math.floor((by2-(H-380))/16)%2)*15;
+        ctx.strokeRect(bx2+off,by2,28,14);
+      }
+    }
+    ctx.fillStyle=near?'#6a3a70':'#3c2040';
+    ctx.beginPath();ctx.moveTo(b.x-80,H-380);ctx.lineTo(b.x,H-448);ctx.lineTo(b.x+80,H-380);ctx.closePath();ctx.fill();
+    ctx.strokeStyle=near?'#9a5aaa':'#5a3060'; ctx.lineWidth=2;
+    ctx.beginPath();ctx.moveTo(b.x-80,H-380);ctx.lineTo(b.x,H-448);ctx.lineTo(b.x+80,H-380);ctx.stroke();
+    ctx.fillStyle=near?'#e8c870':'#180e10'; ctx.fillRect(b.x-18,H-248,36,48);
+    if(near){ctx.fillStyle='#1a1020';ctx.fillRect(b.x-16,H-246,32,44);ctx.fillStyle='#e8c870';ctx.fillRect(b.x-2,H-230,4,4);}
+    ctx.fillStyle=near?'#7090e0':'#1e1828';
+    ctx.fillRect(b.x-48,H-340,28,28); ctx.fillRect(b.x+20,H-340,28,28);
+    if(near){
+      ctx.strokeStyle='#e8c870'; ctx.lineWidth=1;
+      ctx.strokeRect(b.x-48,H-340,28,28); ctx.strokeRect(b.x+20,H-340,28,28);
+      ctx.beginPath();ctx.moveTo(b.x-34,H-340);ctx.lineTo(b.x-34,H-312);ctx.moveTo(b.x-48,H-326);ctx.lineTo(b.x-20,H-326);ctx.stroke();
+      ctx.beginPath();ctx.moveTo(b.x+34,H-340);ctx.lineTo(b.x+34,H-312);ctx.moveTo(b.x+20,H-326);ctx.lineTo(b.x+48,H-326);ctx.stroke();
+    }
+    ctx.fillStyle=near?'#3c2040':'#2a1830'; ctx.fillRect(b.x-52,H-295,104,26);
+    ctx.fillStyle=near?'#e8c870':'#a07850';
+    ctx.font=`${fz(10)}px 'Press Start 2P',monospace`; ctx.textAlign='center';
+    ctx.fillText(b.label,b.x,H-276);
+    if(near){
+      ctx.fillStyle='rgba(20,10,30,0.85)'; ctx.fillRect(b.x-68,H-450,136,20);
+      ctx.fillStyle='#e8c870'; ctx.font=`${fz(8)}px 'Press Start 2P',monospace`;
+      ctx.fillText('[ SPACE ]',b.x,H-436);
+    }
+    ctx.textAlign='left';
+  }
+  // 항구 안내 표지판 (토글)
+  if (showHarborGuide) {
+    const _sx=W/2, _sy=H-640;
+    ctx.fillStyle='#5a3510'; ctx.fillRect(_sx-6,_sy,12,200);
+    ctx.fillStyle='#3a2008'; ctx.fillRect(_sx-6,_sy+20,12,180);
+    ctx.fillStyle='#c08030'; ctx.fillRect(_sx-280,_sy-10,560,180);
+    ctx.fillStyle='#8a5a18'; ctx.fillRect(_sx-280,_sy-10,560,8); ctx.fillRect(_sx-280,_sy+162,560,8);
+    ctx.fillStyle='#120a04'; ctx.fillRect(_sx-276,_sy-2,552,164);
+    ctx.strokeStyle='rgba(255,200,60,0.7)'; ctx.lineWidth=2; ctx.strokeRect(_sx-274,_sy,548,160);
+    ctx.fillStyle='#ffe070'; ctx.font=`bold ${fz(20)}px 'Press Start 2P',monospace`; ctx.textAlign='center';
+    ctx.shadowColor='#ffaa00'; ctx.shadowBlur=8;
+    ctx.fillText('[ 항구 안내판 ]', _sx, _sy+30);
+    ctx.shadowBlur=0;
+    ctx.strokeStyle='#6a4a18'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(_sx-260,_sy+40); ctx.lineTo(_sx+260,_sy+40); ctx.stroke();
+    ctx.fillStyle='#e8c870'; ctx.font=`${fz(13)}px 'Press Start 2P',monospace`; ctx.textAlign='left';
+    ctx.fillText('A / D        :  이동',              _sx-260, _sy+68);
+    ctx.fillText('Space        :  건물 입장 / 캐스팅', _sx-260, _sy+94);
+    ctx.fillText('우측 끝+Space:  항구 이동',          _sx-260, _sy+120);
+    ctx.fillText('좌측 끝+Space:  낚시터 이동',        _sx-260, _sy+146);
+    ctx.textAlign='left';
+  }
+
+  const px=harborPlayer.x, py=H-208;
+  ctx.fillStyle='#d4b8a0'; ctx.fillRect(px-6,py-32,12,14);
+  ctx.fillStyle='#3050a0'; ctx.fillRect(px-8,py-18,16,20);
+  ctx.fillStyle='#7a5020'; ctx.fillRect(px-8,py+2,7,14); ctx.fillRect(px+1,py+2,7,14);
+  ctx.fillStyle='#3050a0'; ctx.fillRect(px-13,py-16,5,12); ctx.fillRect(px+8,py-16,5,12);
+  ctx.strokeStyle='#8a6040'; ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(px+8,py-14);ctx.lineTo(px+26,py-38);ctx.stroke();
+  if(harborPlayer.x<=130 && !locationSelectMode){
+    ctx.fillStyle='rgba(20,10,30,0.85)'; ctx.fillRect(10,H-264,230,22);
+    ctx.fillStyle='#e8c870'; ctx.font=`${fz(8)}px 'Press Start 2P',monospace`;
+    ctx.fillText('[ SPACE ] 낚시터로',20,H-248);
+  } else if(harborPlayer.x<260 && !locationSelectMode){
+    ctx.fillStyle='rgba(20,10,30,0.75)'; ctx.fillRect(10,H-264,200,22);
+    ctx.fillStyle='#a08060'; ctx.font=`${fz(8)}px 'Press Start 2P',monospace`;
+    ctx.fillText('← A: 낚시터로',20,H-248);
+  }
+  if (locationSelectMode) {
+    ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#e8c870'; ctx.font=`${fz(22)}px 'Press Start 2P',monospace`; ctx.textAlign='center';
+    ctx.fillText('어디로 갈까?', W/2, H/2-100);
+    const seaSel=locationSelectChoice==='sea';
+    ctx.fillStyle=seaSel?'#1c3a78':'#141020';
+    ctx.fillRect(W/2-310,H/2-54,260,90);
+    ctx.strokeStyle=seaSel?'#4888e8':'#3a2e48'; ctx.lineWidth=seaSel?3:1;
+    ctx.strokeRect(W/2-310,H/2-54,260,90);
+    ctx.fillStyle=seaSel?'#e8dfc8':'#5a4870';
+    ctx.font=`${fz(15)}px 'Press Start 2P',monospace`;
+    ctx.fillText('바다', W/2-180, H/2+2);
+    ctx.font=`${fz(10)}px 'Press Start 2P',monospace`;
+    ctx.fillStyle=seaSel?'#a0c8ff':'#3a2e48';
+    ctx.fillText('심해 · 고가치 어종', W/2-180, H/2+26);
+    const freshSel=locationSelectChoice==='fresh';
+    const freshLocked=!state.freshUnlocked;
+    ctx.fillStyle=freshLocked?'#1a1220':(freshSel?'#163a28':'#141020');
+    ctx.fillRect(W/2+50,H/2-54,260,90);
+    ctx.strokeStyle=freshLocked?'#5a2a5a':(freshSel?'#48c888':'#3a2e48'); ctx.lineWidth=freshSel?3:1;
+    ctx.strokeRect(W/2+50,H/2-54,260,90);
+    ctx.fillStyle=freshLocked?'#7a3a7a':(freshSel?'#e8dfc8':'#5a4870');
+    ctx.font=`${fz(15)}px 'Press Start 2P',monospace`;
+    ctx.fillText(freshLocked?'🔒 민물':'민물', W/2+180, H/2+2);
+    ctx.font=`${fz(10)}px 'Press Start 2P',monospace`;
+    if (freshLocked) {
+      ctx.fillStyle='#8a4a8a';
+      const prog=Math.min(100,Math.floor(state.gold/100));
+      ctx.fillText(`${Math.floor(state.gold)}/10000원`, W/2+180, H/2+22);
+      ctx.fillStyle='#3a1a3a'; ctx.fillRect(W/2+80,H/2+30,200,8);
+      ctx.fillStyle='#c050c0'; ctx.fillRect(W/2+80,H/2+30,prog*2,8);
+    } else {
+      ctx.fillStyle=freshSel?'#80e8b0':'#3a2e48';
+      ctx.fillText('메기 · 피라냐 · 연어', W/2+180, H/2+26);
+    }
+    ctx.fillStyle='#6a5878'; ctx.font=`${fz(9)}px 'Press Start 2P',monospace`;
+    ctx.fillText('A/D 선택   SPACE 출발', W/2, H/2+76);
+    ctx.textAlign='left';
+  }
+}
+
+function spawnFish() {
+  if (fishes.length >= MAX_FISH) return;
+  const reachable = FISH_DB.filter(f => f.loc===currentLoc && f.depth[0] <= maxDepth());
+  if (!reachable.length) return;
+  const fish = weightedChoice(reachable, f => {
+    const base = [1, 0.22, 0.038, 0.005, 0.0008][f.tier-1] ?? 0.0008;
+    return base * (1 + baitBias() * (f.tier-1) * 0.9);
+  });
+  const isBottom = fish.shape==='crab'||fish.shape==='crayfish'||!!fish.bottom;
+  const y = isBottom ? (SURFACE_Y+maxDepth()-20) : Math.max(SURFACE_Y+45, fish.depth[0] + Math.random()*(fish.depth[1]-fish.depth[0]));
+  const dir = Math.random()<0.5 ? 1 : -1;
+  fishes.push({ data:fish, x:dir<0?W+30:-30, y, vx:fish.speed*dir, wob:Math.random()*Math.PI*2, caught:false, bottom:isBottom });
+}
+
+function updateFishes(dt) {
+  for (const f of fishes) {
+    f.x+=f.vx*dt;
+    if (!f.bottom) { f.wob+=dt*3; f.y+=Math.sin(f.wob*1.4)*0.6; }
+  }
+  for (let i=fishes.length-1;i>=0;i--) { if (fishes[i].x<-80||fishes[i].x>W+80) fishes.splice(i,1); }
+  if (fishes.length<MAX_FISH && Math.random()<0.05) spawnFish();
+}
+
+// ========== 수족관 수영자 ==========
+const swimSea=[], swimFresh=[], bubSea=[], bubFresh=[];
+function syncAquariumSwimmers() {
+  swimSea.length=0;
+  for (const inst of state.aquarium_sea) {
+    const fish=FISH_BY_ID[inst.fishId]; if(!fish) continue;
+    const isBot=fish.shape==='crab'||fish.shape==='crayfish'||!!fish.bottom;
+    swimSea.push({ data:fish, x:80+Math.random()*620, y:isBot?613:290+Math.random()*240, vx:(Math.random()*40+15)*(Math.random()<.5?1:-1), wob:Math.random()*Math.PI*2, t:Math.random()*3+2, bottom:isBot, startleTimer:0 });
+  }
+  swimFresh.length=0;
+  for (const inst of state.aquarium_fresh) {
+    const fish=FISH_BY_ID[inst.fishId]; if(!fish) continue;
+    const isBot2=fish.shape==='crab'||fish.shape==='crayfish'||!!fish.bottom;
+    swimFresh.push({ data:fish, x:870+Math.random()*620, y:isBot2?613:290+Math.random()*240, vx:(Math.random()*35+12)*(Math.random()<.5?1:-1), wob:Math.random()*Math.PI*2, t:Math.random()*3+2, bottom:isBot2, startleTimer:0 });
+  }
+}
+function updateSwimmers(arr, minX, maxX, dt) {
+  for (const f of arr) {
+    f.x+=f.vx*dt; f.t-=dt;
+    if (f.startleTimer>0) f.startleTimer-=dt;
+    if (!f.bottom) { f.wob+=dt*2; f.y+=Math.sin(f.wob)*0.9; }
+    if (f.t<=0) { f.vx=(Math.random()*40+20)*(Math.random()<.5?1:-1); f.t=Math.random()*3+2; }
+    if (f.x<minX+10) f.vx=Math.abs(f.vx);
+    if (f.x>maxX-10) f.vx=-Math.abs(f.vx);
+  }
+}
+function updateAquarium(dt) {
+  const fillBub = (arr, ox) => {
+    while (arr.length<12) arr.push({x:ox+Math.random()*630, y:570, r:Math.random()*5+2, spd:Math.random()*14+18, a:0.25+Math.random()*0.35});
+    for (const b of arr) {
+      b.y-=b.spd*dt; b.a-=dt*0.08;
+      if (b.y<240||b.a<=0) Object.assign(b,{x:ox+Math.random()*630,y:570,r:Math.random()*5+2,spd:Math.random()*14+18,a:0.25+Math.random()*0.35});
+    }
+  };
+  fillBub(bubSea, 55); fillBub(bubFresh, 845);
+  updateSwimmers(swimSea,   55, 730, dt);
+  updateSwimmers(swimFresh, 845,1555, dt);
+}
+
+// ========== 날씨 ==========
+function initWeather() {
+  weather = { mode:'clear', timer:0, clouds:[] };
+  for (let i=0;i<10;i++) weather.clouds.push({ x:Math.random()*W, y:40+Math.random()*80, scale:0.8+Math.random()*0.7, vx:8+Math.random()*12, opacity:0.35+Math.random()*0.2, thin:Math.random() });
+}
+function updateWeather(dt) {
+  weather.timer+=dt;
+  if (weather.timer>18) { weather.timer=0; const r=Math.random(); weather.mode=r<0.3?'rain':r<0.65?'cloudy':'clear'; }
+  for (const c of weather.clouds) { c.x+=c.vx*dt*(weather.mode==='rain'?1.2:1); if (c.x>W+120) c.x=-160; }
+}
+function drawCloud(cloud) {
+  const sy = 0.3+(1-cloud.thin)*0.7;
+  ctx.save(); ctx.translate(cloud.x, cloud.y); ctx.scale(cloud.scale, cloud.scale*sy);
+  ctx.fillStyle=`rgba(255,255,255,${cloud.opacity})`;
+  ctx.beginPath();
+  ctx.arc(0,0,28,0,Math.PI*2); ctx.arc(28,-3,22,0,Math.PI*2); ctx.arc(54,1,25,0,Math.PI*2);
+  ctx.arc(80,-2,21,0,Math.PI*2); ctx.arc(14,-20,16,0,Math.PI*2); ctx.arc(40,-23,19,0,Math.PI*2); ctx.arc(65,-18,14,0,Math.PI*2);
+  ctx.fill(); ctx.restore();
+}
+
+// ========== 낚시 로직 ==========
+function handleSpacePress() {
+  if (harborMode) { handleHarborSpace(); return; }
+  if ((currentTab==='sea'||currentTab==='fresh') && boat.x>=W-100 && line.state!=='HOOKED') { enterHarbor(); return; }
+  if (currentTab!=='sea' && currentTab!=='fresh') return;
+  if (line.state==='IDLE') {
+    if (state.inventory.length>=inventoryCap()) { flashHint('인벤토리 가득. 상점에서 정리.'); return; }
+    line.state='CASTING'; line.hookX=boat.x; line.hookY=SURFACE_Y; line.tension=0;
+  } else if (line.state==='HOOKED') {
+    line.escapeTimer=0;
+    line.hookY-=14; line.tension+=line.hookedFish.data.struggle;
+    if (line.tension>=tensionCap()) { flashHint('줄 끊어짐! '+line.hookedFish.data.name+' 놓침'); line.hookedFish=null; line.state='REELING'; }
+    if (line.hookY<=SURFACE_Y) { catchFish(line.hookedFish); line.hookedFish=null; line.state='IDLE'; }
+  } else if (line.state==='CASTING') { line.state='REELING'; }
+}
+
+function checkHookCollision() {
+  for (const fish of fishes) {
+    if (fish.caught) continue;
+    const dx=fish.x-line.hookX, dy=fish.y-line.hookY;
+    if (dx*dx+dy*dy<34*34) {
+      if (fish.data.minRod > state.upgrades.rod) {
+        flashHint(`낚싯대 부족! ${fish.data.name}은 Lv.${fish.data.minRod} 필요`);
+        line.state='REELING'; return;
+      }
+      fish.caught=true; line.hookedFish=fish; line.state='HOOKED'; line.escapeTimer=0; return;
+    }
+  }
+}
+
+function updateLine(dt) {
+  if (line.state==='CASTING'||line.state==='HOOKED') {
+    if (keys['ArrowLeft']||keys['KeyA']) line.hookX-=120*dt;
+    if (keys['ArrowRight']||keys['KeyD']) line.hookX+=120*dt;
+    line.hookX=Math.max(20,Math.min(W-20,line.hookX));
+  }
+  if (line.state==='CASTING') {
+    line.hookY+=line.descendSpeed*dt;
+    if (line.hookY>=SURFACE_Y+maxDepth()) line.state='REELING';
+    checkHookCollision(); checkChestCollision();
+  } else if (line.state==='HOOKED') {
+    line.tension=Math.max(0,line.tension-35*dt);
+    line.hookedFish.x=line.hookX; line.hookedFish.y=line.hookY;
+    line.hookY+=20*dt;
+    line.escapeTimer+=dt;
+    if (line.escapeTimer>=3) { flashHint(line.hookedFish.data.name+' 도망갔다!'); line.hookedFish.caught=false; line.hookedFish=null; line.state='REELING'; line.escapeTimer=0; }
+    if (line.hookY>=SURFACE_Y+maxDepth()) { flashHint('너무 깊이 끌려감.'); line.hookedFish=null; line.state='REELING'; }
+  } else if (line.state==='REELING') {
+    line.hookY-=280*dt;
+    if (line.hookY<=SURFACE_Y) { line.hookY=SURFACE_Y; line.state='IDLE'; }
+    checkHookCollision(); // 회수 중에도 물고기 걸릴 수 있음
+  } else { line.hookX=boat.x; line.hookY=SURFACE_Y; }
+}
+
+function catchFish(fishEnt) {
+  const isNew = !state.seenFish.includes(fishEnt.data.id);
+  const inst={instId:state.nextInstId++, fishId:fishEnt.data.id};
+  state.inventory.push(inst);
+  if (isNew) state.seenFish.push(fishEnt.data.id);
+  const idx=fishes.indexOf(fishEnt); if (idx>=0) fishes.splice(idx,1);
+  const suffix = fishEnt.data.tier>=5?' !!!LEGENDARY!!!' : fishEnt.data.tier>=4?' [★희귀]' : '';
+  flashHint('잡았다! '+fishEnt.data.name+suffix);
+  if (isNew) {
+    const cols=['#ffe070','#ff8844','#88eeff','#ff88cc','#aaffaa','#ffaaff','#ffffaa'];
+    const parts=[];
+    for(let i=0;i<40;i++){
+      const a=Math.random()*Math.PI*2, spd=150+Math.random()*350;
+      parts.push({x:W/2,y:H/2,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:1,col:cols[i%cols.length],r:4+Math.random()*6});
+    }
+    firstCatchAnim={timer:3.0,fish:fishEnt.data,parts};
+  }
+  saveState(); renderPanels();
+}
+
+// ========== 그리기 ==========
+function toSY(worldY) {
+  if (worldY <= SURFACE_Y) return worldY;
+  return SURFACE_Y + (worldY - SURFACE_Y) * (H - SURFACE_Y - 60) / maxDepth();
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  if (harborMode && currentTab!=='aquarium') { drawHarbor(); return; }
+  if (currentTab==='aquarium') { drawAquarium(); return; }
+  // 하늘 (레트로 픽셀 띠)
+  const skyPalette = currentLoc==='fresh'
+    ? ['#1a3050','#1e3c60','#224470','#286478','#2e7488','#348498','#3a94a8','#4a90c0']
+    : weather.mode==='rain'
+    ? ['#0e0818','#120a1e','#160c24','#1a0e28','#1e1028','#201228','#221428','#281430']
+    : weather.mode==='cloudy'
+    ? ['#120a20','#181030','#1c1438','#201840','#221a42','#241c44','#261e46','#2a1840']
+    : ['#0e0818','#14082a','#1e1040','#2c1848','#3e1c40','#541830','#6c1820','#6a2850'];
+  const skyBH=Math.ceil(SURFACE_Y/skyPalette.length);
+  skyPalette.forEach((c,i)=>{ctx.fillStyle=c;ctx.fillRect(0,i*skyBH,W,skyBH+1);});
+  if(currentLoc!=='fresh'&&weather.mode!=='rain'){
+    ctx.fillStyle='#e8dfc8';
+    [[80,14],[200,8],[360,22],[480,10],[620,18],[760,6],[900,24],[1050,12],[1200,8],[1380,20],[1520,14]].forEach(([x,y])=>{ctx.fillRect(x,y,2,2);});
+  }
+
+  // 태양
+  if (currentLoc==='fresh') {
+    ctx.fillStyle='#ffe060'; ctx.beginPath(); ctx.arc(W/2, 65, 48, 0, Math.PI*2); ctx.fill();
+  } else {
+    // 노을 태양 - 수평선 근처에 크고 주황
+    const sunG=ctx.createRadialGradient(W-180,SURFACE_Y-18,0,W-180,SURFACE_Y-18,60);
+    sunG.addColorStop(0,'#ffe0a0'); sunG.addColorStop(0.4,'#ff8030'); sunG.addColorStop(1,'rgba(255,80,0,0)');
+    ctx.fillStyle=sunG; ctx.beginPath(); ctx.arc(W-180,SURFACE_Y-18,60,0,Math.PI*2); ctx.fill();
+  }
+
+  for (const c of weather.clouds) drawCloud(c);
+
+  // 비
+  if (weather.mode==='rain' && currentLoc==='sea') {
+    ctx.strokeStyle='rgba(200,220,255,0.3)'; ctx.lineWidth=1;
+    for (let i=0;i<65;i++) { const x=Math.random()*W,y=20+Math.random()*(SURFACE_Y-20); ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+2,y+10); ctx.stroke(); }
+  }
+
+  // 민물 강둑 + 나무
+  if (currentLoc==='fresh') {
+    ctx.fillStyle='#4a7a30'; ctx.fillRect(0,SURFACE_Y-40,130,50); ctx.fillRect(W-130,SURFACE_Y-40,130,50);
+    ctx.fillStyle='#3a6020'; ctx.fillRect(0,SURFACE_Y-28,110,38); ctx.fillRect(W-110,SURFACE_Y-28,110,38);
+    ctx.fillStyle='#2a4a15';
+    for (let i=0;i<4;i++) {
+      const tx=22+i*28;
+      ctx.beginPath(); ctx.moveTo(tx,SURFACE_Y-36); ctx.lineTo(tx-12,SURFACE_Y-36); ctx.lineTo(tx-7,SURFACE_Y-62); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(tx,SURFACE_Y-36); ctx.lineTo(tx+12,SURFACE_Y-36); ctx.lineTo(tx+7,SURFACE_Y-62); ctx.closePath(); ctx.fill();
+      const tx2=W-22-i*28;
+      ctx.beginPath(); ctx.moveTo(tx2,SURFACE_Y-36); ctx.lineTo(tx2-12,SURFACE_Y-36); ctx.lineTo(tx2-7,SURFACE_Y-62); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(tx2,SURFACE_Y-36); ctx.lineTo(tx2+12,SURFACE_Y-36); ctx.lineTo(tx2+7,SURFACE_Y-62); ctx.closePath(); ctx.fill();
+    }
+  }
+
+  // 물 (레트로 픽셀 띠)
+  const waterPalette = currentLoc==='fresh'
+    ? ['#2a8872','#226868','#1a5060','#123850','#0e2a3a','#0a1c28','#070e18','#050e0e']
+    : ['#1e3858','#182e50','#122448','#0e1e40','#0a1838','#071230','#040c28','#04060e'];
+  const waterBH=Math.ceil((H-SURFACE_Y)/waterPalette.length);
+  waterPalette.forEach((c,i)=>{ctx.fillStyle=c;ctx.fillRect(0,SURFACE_Y+i*waterBH,W,waterBH+1);});
+
+  // 수면선 (픽셀 파도)
+  const waveCol=currentLoc==='fresh'?'#5ad4c0':'#c06840';
+  ctx.fillStyle=waveCol;
+  for(let wx=0;wx<W;wx+=8){const wo=Math.sin(wx*0.08+gameTime*3)>0;ctx.fillRect(wx,SURFACE_Y+(wo?-3:-1),6,2);}
+
+  // 해저 바닥
+  const floorY=toSY(SURFACE_Y+maxDepth());
+  const fg=ctx.createLinearGradient(0,floorY-20,0,floorY+20);
+  fg.addColorStop(0,'rgba(0,0,0,0)'); fg.addColorStop(1,currentLoc==='fresh'?'#1a2e18':'#0c1828');
+  ctx.fillStyle=fg; ctx.fillRect(0,floorY-20,W,40);
+  ctx.fillStyle=currentLoc==='fresh'?'#263c20':'#141e30'; ctx.fillRect(0,floorY,W,H-floorY);
+  ctx.fillStyle=currentLoc==='fresh'?'#324a28':'#1c2c40';
+  for(let i=0;i<W;i+=16){const jy=Math.sin(i*0.14)*3;ctx.fillRect(i,floorY+2+jy,12,6);}
+  ctx.fillStyle=currentLoc==='fresh'?'#405c34':'#24384e';
+  for(let i=8;i<W;i+=24){const jy=Math.cos(i*0.11)*2;ctx.fillRect(i,floorY+jy,8,4);}
+
+  // 해초
+  const seaweedXs=[70,190,330,510,680,870,1040,1210,1390,1540];
+  for(const sx of seaweedXs){
+    const sh=28+((sx*7)%22);
+    const col1=currentLoc==='fresh'?'#2a7a38':'#1a5c4a';
+    const col2=currentLoc==='fresh'?'#3a9a50':'#2a8060';
+    for(let seg=0;seg<5;seg++){
+      const sy0=floorY-seg*(sh/5), sy1=floorY-(seg+1)*(sh/5);
+      const sway=Math.sin(gameTime*2.2+sx*0.04+seg*0.9)*6;
+      ctx.strokeStyle=seg%2===0?col1:col2; ctx.lineWidth=3.5-seg*0.5;
+      ctx.beginPath(); ctx.moveTo(sx+sway*0.6,sy0); ctx.lineTo(sx+sway,sy1); ctx.stroke();
+    }
+  }
+  // 바위
+  const rockXs=[130,260,430,600,750,940,1100,1300,1460];
+  for(const rx of rockXs){
+    const rs=12+((rx*13)%14); const jy=Math.sin(rx*0.12)*3;
+    ctx.fillStyle=currentLoc==='fresh'?'#283820':'#18202e';
+    ctx.beginPath(); ctx.ellipse(rx,floorY-4+jy,rs,rs*0.65,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=currentLoc==='fresh'?'#364a2c':'#222e3c';
+    ctx.beginPath(); ctx.ellipse(rx-3,floorY-7+jy,rs*0.65,rs*0.42,-0.25,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=currentLoc==='fresh'?'#48603a':'#2e3c50';
+    ctx.beginPath(); ctx.ellipse(rx-rs*0.3,floorY-10+jy,rs*0.3,rs*0.2,0,0,Math.PI); ctx.fill();
+  }
+
+  drawChests();
+  for (const f of fishes) drawFish(f);
+
+  drawBoat();
+  // 낚시줄 (rod tip → hook)
+  if (line.state!=='IDLE'||line.hookY>SURFACE_Y) {
+    const sHookY=toSY(line.hookY);
+    const tipX=boat.x+42, tipY=boat.y-34;
+    ctx.strokeStyle='#ddd'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(tipX,tipY); ctx.lineTo(line.hookX,sHookY); ctx.stroke();
+    ctx.fillStyle='#aaa'; ctx.fillRect(line.hookX-3,sHookY-3,6,6);
+  }
+
+  // 텐션 바
+  if (line.state==='HOOKED') {
+    const _bw=fz(60), _bh=Math.max(6,fz(6));
+    const bx=line.hookX-_bw/2, by=toSY(line.hookY)-_bh-fz(14);
+    ctx.fillStyle='#000'; ctx.fillRect(bx-1,by-1,_bw+2,_bh+2);
+    const pct=line.tension/tensionCap();
+    ctx.fillStyle=pct>0.75?'#e84a4a':pct>0.5?'#e8c44a':'#4ae87a'; ctx.fillRect(bx,by,_bw*pct,_bh);
+    ctx.fillStyle='#e8c870'; ctx.font=`${fz(8)}px 'Press Start 2P',monospace`; ctx.fillText('SPACE!',bx,by-4);
+  }
+
+  // 항구 팻말 (우측)
+  const _sg=0.55+0.45*Math.sin(gameTime*2.2);
+  ctx.fillStyle='#6b4520'; ctx.fillRect(W-72,SURFACE_Y-130,8,132);
+  ctx.fillStyle='#b07828'; ctx.fillRect(W-212,SURFACE_Y-148,152,56);
+  ctx.fillStyle='#8a5a1a'; ctx.fillRect(W-212,SURFACE_Y-148,152,5); ctx.fillRect(W-212,SURFACE_Y-97,152,5);
+  ctx.strokeStyle=`rgba(255,220,80,${_sg})`; ctx.lineWidth=2;
+  ctx.strokeRect(W-210,SURFACE_Y-145,148,50);
+  ctx.fillStyle='#110a04'; ctx.fillRect(W-208,SURFACE_Y-143,144,46);
+  ctx.fillStyle='#ffe070'; ctx.font=`${fz(18)}px 'Press Start 2P',monospace`; ctx.textAlign='center';
+  ctx.shadowColor='#ffcc00'; ctx.shadowBlur=8*_sg;
+  ctx.fillText('항구 →', W-136, SURFACE_Y-118);
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#c8a84a'; ctx.font=`${fz(11)}px 'Press Start 2P',monospace`;
+  ctx.fillText('우측끝+Space', W-136, SURFACE_Y-101);
+  ctx.textAlign='left';
+  // 힌트
+  if (hintFlash.timer>0) {
+    const _hfh=Math.max(36,fz(14)+8); const _hfw=Math.min(W-40,560+fz(60)); ctx.fillStyle='rgba(20,10,30,0.85)'; ctx.fillRect(W/2-_hfw/2,8,_hfw,_hfh);
+    ctx.fillStyle='#e8c870'; ctx.font=`${fz(11)}px 'Press Start 2P',monospace`; ctx.textAlign='center'; ctx.fillText(hintFlash.text,W/2,8+_hfh*0.72); ctx.textAlign='left';
+  }
+  drawFirstCatch();
+}
+
+const ROD_COLORS = ['#8b5e2a','#7a7a9a','#1a1a2e','#c8a030','#00eeff'];
+function drawBoat() {
+  const x=boat.x, y=boat.y;
+  const rodLv = state.upgrades.rod||0;
+  const rodCol = ROD_COLORS[Math.min(rodLv, ROD_COLORS.length-1)];
+  // 선체
+  ctx.fillStyle='#7a5030'; ctx.beginPath(); ctx.moveTo(x-54,y+10); ctx.lineTo(x+54,y+10); ctx.lineTo(x+40,y+32); ctx.lineTo(x-40,y+32); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#4a2e14'; ctx.fillRect(x-54,y+8,108,4);
+  // 갑판 디테일
+  ctx.fillStyle='#5a3820'; ctx.fillRect(x-38,y+12,76,3);
+  // 돛대
+  ctx.fillStyle='#3a2010'; ctx.fillRect(x-2,y-40,4,50);
+  // 돛
+  ctx.fillStyle='#f0f0f0'; ctx.beginPath(); ctx.moveTo(x+2,y-38); ctx.lineTo(x+30,y-4); ctx.lineTo(x+2,y-4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.08)'; ctx.beginPath(); ctx.moveTo(x+2,y-38); ctx.lineTo(x+30,y-4); ctx.lineTo(x+2,y-4); ctx.closePath(); ctx.fill();
+  // 선원
+  ctx.fillStyle='#ffd9b3'; ctx.fillRect(x-24,y-12,8,8);
+  ctx.fillStyle='#2d5a8a'; ctx.fillRect(x-26,y-4,12,14);
+  ctx.fillStyle='#7a5020'; ctx.fillRect(x-26,y+10,5,5); ctx.fillRect(x-19,y+10,5,5);
+  // ── 낚싯대 ──
+  // 손잡이 (선원 옆)
+  ctx.strokeStyle=rodCol; ctx.lineWidth=4; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(x+10,y+2); ctx.lineTo(x+42,y-34); ctx.stroke();
+  // 가이드 링 (업그레이드 레벨마다 하나씩 더)
+  ctx.strokeStyle='rgba(200,200,200,0.7)'; ctx.lineWidth=1.5;
+  for(let i=0;i<=Math.min(rodLv,4);i++){
+    const t=(i+1)/(6);
+    const rx=x+10+(x+42-(x+10))*t, ry=y+2+(y-34-(y+2))*t;
+    ctx.beginPath(); ctx.arc(rx,ry,2,0,Math.PI*2); ctx.stroke();
+  }
+  // 업그레이드 레벨 표시 (높은 레벨엔 글로우)
+  if (rodLv >= 3) { ctx.shadowColor=rodCol; ctx.shadowBlur=8; }
+  ctx.strokeStyle=rodCol; ctx.lineWidth=4; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(x+10,y+2); ctx.lineTo(x+42,y-34); ctx.stroke();
+  ctx.shadowBlur=0;
+}
+
+function drawFish(f) {
+  const s = f.vx>0 ? 1.1 : -1.1;
+  ctx.save(); ctx.translate(f.x,toSY(f.y)); ctx.scale(s,1.1);
+  drawShape(f.data.shape, f.data.color); ctx.restore();
+}
+
+// ========== 수족관 ==========
+function drawTankBg(tx, ty, tw, th, c1, c2) {
+  ctx.fillStyle='#050c14'; ctx.fillRect(tx,ty,tw,th);
+  const g=ctx.createLinearGradient(0,ty,0,ty+th); g.addColorStop(0,c1); g.addColorStop(1,c2);
+  ctx.fillStyle=g; ctx.fillRect(tx+4,ty+4,tw-8,th-8);
+  // 빛 줄기
+  ctx.save(); ctx.beginPath(); ctx.rect(tx+4,ty+4,tw-8,th-8); ctx.clip();
+  for (let i=0;i<4;i++) {
+    const rx=tx+40+i*(tw/4.2)+Math.sin(gameTime*0.45+i*1.3)*18, rw=28+Math.sin(gameTime*0.28+i*0.9)*8;
+    const lg=ctx.createLinearGradient(rx,ty,rx+12,ty+th);
+    lg.addColorStop(0,'rgba(200,240,255,0.12)'); lg.addColorStop(1,'rgba(200,240,255,0)');
+    ctx.fillStyle=lg; ctx.beginPath(); ctx.moveTo(rx,ty); ctx.lineTo(rx+rw+16,ty+th); ctx.lineTo(rx+rw+28,ty+th); ctx.lineTo(rx+14,ty); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // 자갈
+  for (let i=0;i<55;i++) {
+    const gx=tx+8+(i%11)*Math.floor((tw-16)/11)+(i%3)*2, gy=ty+th-20+Math.sin(i*0.4)*3+(i%4)*2;
+    ctx.fillStyle='#4b3e2d'; ctx.fillRect(gx,gy,12,6);
+    ctx.fillStyle='#73604d'; ctx.fillRect(gx+2,gy+2,8,4);
+  }
+  // 식물
+  for (let i=0;i<4;i++) {
+    const bx=tx+30+i*Math.floor((tw-60)/4);
+    ctx.strokeStyle='#6bbf74'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(bx,ty+th-20); ctx.quadraticCurveTo(bx-20,ty+th-70,bx+10,ty+th-120); ctx.quadraticCurveTo(bx+28,ty+th-150,bx+10,ty+th-180); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx+10,ty+th-20); ctx.quadraticCurveTo(bx+20,ty+th-70,bx+40,ty+th-130); ctx.quadraticCurveTo(bx+50,ty+th-155,bx+40,ty+th-178); ctx.stroke();
+  }
+}
+
+function drawTankTop(tx, ty, tw) {
+  // 파도
+  ctx.save(); ctx.beginPath(); ctx.rect(tx+4,ty+4,tw-8,200); ctx.clip();
+  const wb=ty+22;
+  ctx.fillStyle='rgba(140,215,255,0.18)'; ctx.beginPath(); ctx.moveTo(tx+4,ty+4);
+  for (let x=tx+4;x<=tx+tw-4;x+=3) { const wy=wb+Math.sin(x*0.022+gameTime*2.8)*6+Math.sin(x*0.038+gameTime*1.9)*3; ctx.lineTo(x,wy); }
+  ctx.lineTo(tx+tw-4,ty+4); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='rgba(210,245,255,0.5)'; ctx.lineWidth=1.5; ctx.beginPath();
+  for (let x=tx+4;x<=tx+tw-4;x+=3) { const wy=wb+Math.sin(x*0.022+gameTime*2.8)*6+Math.sin(x*0.038+gameTime*1.9)*3; x===tx+4?ctx.moveTo(x,wy):ctx.lineTo(x,wy); }
+  ctx.stroke(); ctx.restore();
+}
+
+function drawAquarium() {
+  ctx.fillStyle='#09212f'; ctx.fillRect(0,0,W,H);
+  const ty=180, th=460;
+  // 바다 수족관 (왼쪽)
+  drawTankBg(30,ty,740,th,'rgba(85,160,210,0.55)','rgba(10,25,55,0.95)');
+  // 거품
+  for (const b of bubSea) { ctx.fillStyle=`rgba(255,255,255,${b.a})`; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); }
+  drawTankTop(30,ty,740);
+  for (const f of swimSea) { ctx.save(); ctx.translate(f.x,f.y); ctx.scale(f.vx>0?1.3:-1.3,1.3); drawShape(f.data.shape,f.data.color); ctx.restore(); if(f.startleTimer>0){const a=Math.min(1,f.startleTimer/0.4);ctx.fillStyle=`rgba(255,80,80,${a})`;ctx.font=`bold ${fz(Math.floor(20+10*a))}px 'Press Start 2P',monospace`;ctx.textAlign='center';ctx.fillText('!',f.x,f.y-28);ctx.textAlign='left';} }
+  ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=4; ctx.strokeRect(30,ty,740,th);
+  ctx.strokeStyle='rgba(255,255,255,0.07)'; ctx.lineWidth=1; ctx.strokeRect(34,ty+4,732,th-8);
+  ctx.fillStyle='#c8d8f8'; ctx.font=`${fz(11)}px 'Press Start 2P',monospace`; ctx.fillText(`SEA  ${state.aquarium_sea.length}/${seaAquaCap()}`,44,ty+20);
+
+  // 민물 수족관 (오른쪽)
+  drawTankBg(830,ty,740,th,'rgba(45,160,130,0.55)','rgba(5,20,22,0.95)');
+  for (const b of bubFresh) { ctx.fillStyle=`rgba(255,255,255,${b.a})`; ctx.beginPath(); ctx.arc(b.x,b.y,b.r,0,Math.PI*2); ctx.fill(); }
+  drawTankTop(830,ty,740);
+  for (const f of swimFresh) { ctx.save(); ctx.translate(f.x,f.y); ctx.scale(f.vx>0?1.3:-1.3,1.3); drawShape(f.data.shape,f.data.color); ctx.restore(); if(f.startleTimer>0){const a=Math.min(1,f.startleTimer/0.4);ctx.fillStyle=`rgba(255,80,80,${a})`;ctx.font=`bold ${fz(Math.floor(20+10*a))}px 'Press Start 2P',monospace`;ctx.textAlign='center';ctx.fillText('!',f.x,f.y-28);ctx.textAlign='left';} }
+  ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.lineWidth=4; ctx.strokeRect(830,ty,740,th);
+  ctx.strokeStyle='rgba(255,255,255,0.07)'; ctx.lineWidth=1; ctx.strokeRect(834,ty+4,732,th-8);
+  ctx.fillStyle='#b8f0d8'; ctx.font=`${fz(11)}px 'Press Start 2P',monospace`; ctx.fillText(`RIVER  ${state.aquarium_fresh.length}/${freshAquaCap()}`,844,ty+20);
+}
+
+// ========== 형태 헬퍼 ==========
+function drawShape(shape, color) {
+  const m = {
+    shark:drawShark, octopus:drawOctopus, jelly:drawJelly, bass:drawBass,
+    squid:drawSquid, manta:drawManta, puffer:drawPuffer, turtle:drawTurtle,
+    eel:drawEel, crab:drawCrab, shrimp:drawShrimp, whale:drawWhale,
+    anglerfish:drawAnglerfish, kraken:drawKraken,
+    catfish:drawCatfish, piranha:drawPiranha, carp:drawCarp,
+    crayfish:drawCrayfish, sturgeon:drawSturgeon, salmon:drawSalmon,
+    clownfish:drawClownfish, jellycold:drawJellycold, moray:drawMoray,
+    flyingfish:drawFlyingfish, flatfish:drawFlatfish, rockfish:drawRockfish,
+    sunfish:drawSunfish, mermaid:drawMermaid, rainbowdolphin:drawRainbowDolphin,
+    spongebob:drawSpongebob, patrick:drawPatrick, bluewhale:drawBlueWhale,
+    plainbass:drawPlainbass, bluegill:drawBluegill, minnow:drawMinnow,
+    mullet:drawMullet, goldfish:drawGoldfish, trout:drawTrout,
+    snakehead:drawSnakehead, breadfishred:drawBreadfishRed, breadfishcream:drawBreadfishCream,
+    giantmudfish:drawGiantMudfish, goldencarp:drawGoldenCarp,
+  };
+  if (m[shape]) m[shape](color);
+}
+
+// ========== 바다 물고기 형태 ==========
+function drawShark(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,18,7,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-18,0); ctx.lineTo(-26,-8); ctx.lineTo(-26,8); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-2,-7); ctx.lineTo(2,-14); ctx.lineTo(6,-7); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#ff9eb5'; ctx.fillRect(10,-1,12,6);
+  ctx.fillStyle='#fff'; for(let i=0;i<5;i++) ctx.fillRect(11+i*2,0,1,4);
+  ctx.fillStyle='#000'; ctx.fillRect(6,-3,2,2);
+}
+function drawOctopus(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.arc(0,-4,11,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#1a0a05'; for(let i=-8;i<=8;i+=2) ctx.fillRect(i,-15,1,4);
+  ctx.fillStyle='#000'; ctx.fillRect(-1,-14,2,6);
+  ctx.fillStyle=color;
+  for(let i=0;i<8;i++){const ang=(i/7-0.5)*Math.PI,ex=Math.cos(ang)*10,ey=Math.sin(ang)*4+8;ctx.beginPath();ctx.moveTo(0,4);ctx.quadraticCurveTo(ex*0.6,ey*0.5,ex,ey);ctx.lineWidth=2;ctx.strokeStyle=color;ctx.stroke();}
+  ctx.fillStyle='#fff'; ctx.fillRect(-4,-5,3,3); ctx.fillRect(2,-5,3,3);
+  ctx.fillStyle='#000'; ctx.fillRect(-3,-4,1,2); ctx.fillRect(3,-4,1,2);
+}
+function drawJelly(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-10,-2); ctx.lineTo(10,-2); ctx.lineTo(8,-10); ctx.lineTo(-8,-10); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#5a3a1a'; ctx.lineWidth=1; ctx.stroke();
+  ctx.fillStyle='#a07040'; ctx.fillRect(-6,-8,12,1); ctx.fillRect(-6,-5,12,1);
+  ctx.fillStyle='#f5d76e';
+  for(let i=-8;i<=8;i+=4){ctx.beginPath();ctx.moveTo(i,-2);ctx.quadraticCurveTo(i+1,4,i,10);ctx.lineTo(i+2,10);ctx.quadraticCurveTo(i+3,4,i+2,-2);ctx.closePath();ctx.fill();}
+}
+function drawBass(color) {
+  // 통통한 참치 몸통
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,1,20,13,0,0,Math.PI*2); ctx.fill();
+  // 등지느러미 (뾰족)
+  ctx.beginPath(); ctx.moveTo(-6,-13); ctx.lineTo(-2,-22); ctx.lineTo(8,-13); ctx.closePath(); ctx.fill();
+  // 꼬리 (갈라진)
+  ctx.fillStyle='#c8a030';
+  ctx.beginPath(); ctx.moveTo(-20,0); ctx.lineTo(-30,-9); ctx.lineTo(-26,0); ctx.lineTo(-30,9); ctx.closePath(); ctx.fill();
+  // 마요네즈 배 (흰 크림)
+  ctx.fillStyle='rgba(255,255,248,0.82)'; ctx.beginPath(); ctx.ellipse(3,6,13,6,0.15,0,Math.PI*2); ctx.fill();
+  // 마요 짜놓은 선
+  ctx.strokeStyle='rgba(255,255,240,0.95)'; ctx.lineWidth=2.5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-6,5); ctx.bezierCurveTo(-1,2,5,7,11,4); ctx.stroke();
+  // 눈
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(13,-1,3.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(13,-1,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(14,-2,0.8,0,Math.PI*2); ctx.fill();
+  // 입
+  ctx.fillStyle='#b89028'; ctx.beginPath(); ctx.moveTo(19,2); ctx.lineTo(23,2); ctx.lineTo(22,5); ctx.lineTo(18,5); ctx.closePath(); ctx.fill();
+}
+function drawSquid(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,-4,12,9,0,Math.PI,0,true); ctx.fill();
+  ctx.fillStyle='#d7bad7'; ctx.beginPath(); ctx.moveTo(-12,-4); ctx.lineTo(-18,12); ctx.lineTo(-8,8); ctx.lineTo(-4,12); ctx.lineTo(0,8); ctx.lineTo(4,12); ctx.lineTo(8,8); ctx.lineTo(18,12); ctx.lineTo(12,-4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.fillRect(-4,-6,3,3); ctx.fillRect(3,-6,3,3);
+  ctx.fillStyle='#000'; ctx.fillRect(-3,-4,1,2); ctx.fillRect(4,-4,1,2);
+}
+function drawManta(color) {
+  ctx.fillStyle=color;
+  // 윗 날개 (머리=오른쪽, 꼬리=왼쪽)
+  ctx.beginPath();
+  ctx.moveTo(22,0);
+  ctx.bezierCurveTo(12,-12,-6,-34,-22,-30);
+  ctx.bezierCurveTo(-34,-22,-28,-8,-18,0);
+  ctx.closePath(); ctx.fill();
+  // 아래 날개
+  ctx.beginPath();
+  ctx.moveTo(22,0);
+  ctx.bezierCurveTo(12,12,-6,34,-22,30);
+  ctx.bezierCurveTo(-34,22,-28,8,-18,0);
+  ctx.closePath(); ctx.fill();
+  // 중앙 몸통
+  ctx.beginPath(); ctx.ellipse(2,0,20,9,0,0,Math.PI*2); ctx.fill();
+  // 꼬리 (채찍형)
+  ctx.strokeStyle=color; ctx.lineWidth=3; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-18,0); ctx.bezierCurveTo(-28,3,-36,0,-44,10); ctx.stroke();
+  // 머리 cephalic fins (앞으로 뻗은 뿔)
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.moveTo(20,-2); ctx.bezierCurveTo(26,-8,30,-14,26,-18); ctx.bezierCurveTo(23,-12,21,-8,19,-4); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(20,2); ctx.bezierCurveTo(26,8,30,14,26,18); ctx.bezierCurveTo(23,12,21,8,19,4); ctx.closePath(); ctx.fill();
+  // 신문지 텍스트 줄 (가로 촘촘히)
+  ctx.save();
+  ctx.beginPath(); ctx.ellipse(2,0,20,9,0,0,Math.PI*2); ctx.clip();
+  ctx.strokeStyle='rgba(0,0,0,0.22)'; ctx.lineWidth=1;
+  for(let y=-8;y<=8;y+=2.5){ ctx.beginPath(); ctx.moveTo(-18,y); ctx.lineTo(20,y); ctx.stroke(); }
+  ctx.restore();
+  // 날개 위 신문지 줄
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(22,0); ctx.bezierCurveTo(12,-12,-6,-34,-22,-30); ctx.bezierCurveTo(-34,-22,-28,-8,-18,0); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.lineWidth=1;
+  for(let y=-28;y<0;y+=4){ ctx.beginPath(); ctx.moveTo(-26,y); ctx.lineTo(20,y); ctx.stroke(); }
+  ctx.restore();
+  // 날개 아래 신문지 줄
+  ctx.save();
+  ctx.beginPath(); ctx.moveTo(22,0); ctx.bezierCurveTo(12,12,-6,34,-22,30); ctx.bezierCurveTo(-34,22,-28,8,-18,0); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.lineWidth=1;
+  for(let y=4;y<=28;y+=4){ ctx.beginPath(); ctx.moveTo(-26,y); ctx.lineTo(20,y); ctx.stroke(); }
+  ctx.restore();
+  // 복부 흰 반점
+  ctx.fillStyle='rgba(255,255,255,0.28)'; ctx.beginPath(); ctx.ellipse(4,0,13,6,0,0,Math.PI*2); ctx.fill();
+  // 눈
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(16,-4,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(16,-4,1.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(17,-5,0.8,0,Math.PI*2); ctx.fill();
+}
+function drawPuffer(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.fillRect(2,-6,4,3); ctx.fillStyle='#fff'; ctx.fillRect(-4,-7,3,3); ctx.fillRect(6,-7,3,3);
+  ctx.fillStyle='#f9d86b';
+  for(let i=0;i<6;i++){const a=i*Math.PI/3;ctx.beginPath();ctx.moveTo(Math.cos(a)*12,Math.sin(a)*12);ctx.lineTo(Math.cos(a)*16,Math.sin(a)*16);ctx.strokeStyle='#f7c550';ctx.lineWidth=2;ctx.stroke();}
+}
+function drawTurtle(color) {
+  // 몸통
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,2,18,10,0,0,Math.PI*2); ctx.fill();
+  // 등딱지
+  ctx.fillStyle='#1a6040'; ctx.beginPath(); ctx.ellipse(0,-1,13,8,0,0,Math.PI*2); ctx.fill();
+  // 육각형 패턴
+  ctx.strokeStyle='#2a9060'; ctx.lineWidth=1;
+  [[-8,-2],[0,-4],[8,-2],[4,3],[-4,3]].forEach(([ox,oy])=>{
+    ctx.beginPath();
+    for(let p=0;p<6;p++){const a=p*Math.PI/3;ctx[p?'lineTo':'moveTo'](ox+Math.cos(a)*3.5,oy+Math.sin(a)*3.5);}
+    ctx.closePath(); ctx.stroke();
+  });
+  // 레이저 포 (등딱지에 장착)
+  ctx.fillStyle='#334455'; ctx.fillRect(-3,-12,6,7);
+  ctx.fillStyle='#556677'; ctx.fillRect(-2,-19,4,9);
+  ctx.fillStyle='#7799aa'; ctx.fillRect(-1,-21,2,4);
+  // 포 글로우
+  ctx.fillStyle='rgba(68,200,255,0.35)'; ctx.beginPath(); ctx.arc(0,-21,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#44ccff'; ctx.fillRect(-1,-23,2,3);
+  // 앞다리/뒷다리
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.ellipse(-18,5,5,3,0.3,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(14,6,5,3,-0.3,0,Math.PI*2); ctx.fill();
+  // 머리
+  ctx.beginPath(); ctx.ellipse(17,1,6,5,0,0,Math.PI*2); ctx.fill();
+  // 눈 (레이저 레드)
+  ctx.fillStyle='rgba(255,50,0,0.35)'; ctx.beginPath(); ctx.arc(20,-1,6,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(20,-1,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ff2200'; ctx.beginPath(); ctx.arc(20,-1,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(21,-2,0.8,0,Math.PI*2); ctx.fill();
+}
+function drawEel(color) {
+  ctx.strokeStyle=color; ctx.lineWidth=9; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-24,0); ctx.bezierCurveTo(-14,-12,2,12,16,-4); ctx.stroke();
+  ctx.lineWidth=4; ctx.strokeStyle=color+'aa';
+  ctx.beginPath(); ctx.moveTo(-24,-5); ctx.bezierCurveTo(-14,-18,2,4,16,-10); ctx.stroke();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(22,-2,8,6,-0.2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.fillRect(24,-4,2,2); ctx.fillStyle='#000'; ctx.fillRect(24,-4,1,1);
+}
+function drawCrab(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,2,15,10,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(14,0); ctx.lineTo(24,-7); ctx.lineTo(28,-2); ctx.lineTo(26,4); ctx.lineTo(18,3); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#c05030'; ctx.beginPath(); ctx.arc(27,-1,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-14,0); ctx.lineTo(-24,-7); ctx.lineTo(-28,-2); ctx.lineTo(-26,4); ctx.lineTo(-18,3); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#c05030'; ctx.beginPath(); ctx.arc(-27,-1,4,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=color; ctx.lineWidth=2;
+  for(let i=0;i<3;i++){const lx=-7+i*7;ctx.beginPath();ctx.moveTo(lx,10);ctx.lineTo(lx-4,18);ctx.stroke();ctx.beginPath();ctx.moveTo(lx,10);ctx.lineTo(lx+4,18);ctx.stroke();}
+  ctx.fillStyle='#000'; ctx.fillRect(-5,-10,2,5); ctx.fillRect(3,-10,2,5);
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-4,-12,2.5,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(4,-12,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(-4,-12,1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(4,-12,1,0,Math.PI*2); ctx.fill();
+}
+function drawShrimp(color) {
+  // 통통한 C자 몸통 (새우깡 모양)
+  ctx.strokeStyle=color; ctx.lineWidth=10; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(10,-2); ctx.bezierCurveTo(2,-9,-5,-8,-7,-1); ctx.bezierCurveTo(-11,6,-5,12,2,12); ctx.stroke();
+  // 분절 (마디)
+  ctx.strokeStyle=`rgba(0,0,0,0.18)`; ctx.lineWidth=2;
+  for(let i=0;i<3;i++){const t=i/3;const x=-4+t*14-1,y=-5+t*14+1;ctx.beginPath();ctx.moveTo(x,y-4);ctx.lineTo(x+3,y+2);ctx.stroke();}
+  // 꼬리
+  ctx.fillStyle=color;
+  ctx.beginPath();ctx.moveTo(2,12);ctx.lineTo(-3,17);ctx.lineTo(0,18);ctx.lineTo(2,14);ctx.lineTo(4,18);ctx.lineTo(7,17);ctx.closePath();ctx.fill();
+  // 머리
+  ctx.beginPath(); ctx.ellipse(12,-2,7,5,0,0,Math.PI*2); ctx.fill();
+  // 더듬이 (짧게)
+  ctx.strokeStyle='#ddd'; ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(16,-5);ctx.lineTo(22,-11);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(16,-5);ctx.lineTo(21,-7);ctx.stroke();
+  // 눈
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(16,-6,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(16,-6,1.2,0,Math.PI*2); ctx.fill();
+}
+function drawWhale(color) {
+  // 유선형 몸통
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.ellipse(0,0,32,14,0,0,Math.PI*2); ctx.fill();
+  // 꼬리 (갈라진 수평)
+  ctx.beginPath(); ctx.moveTo(-30,0); ctx.lineTo(-44,-10); ctx.lineTo(-40,0); ctx.lineTo(-44,10); ctx.closePath(); ctx.fill();
+  // 등지느러미 (낮고 둥근)
+  ctx.beginPath(); ctx.moveTo(4,-14); ctx.quadraticCurveTo(10,-24,16,-14); ctx.closePath(); ctx.fill();
+  // 가슴지느러미 (긴 날개형)
+  ctx.beginPath(); ctx.moveTo(8,8); ctx.lineTo(-4,24); ctx.lineTo(14,18); ctx.closePath(); ctx.fill();
+  // 배 밝은 색
+  ctx.fillStyle='#dff0ff'; ctx.beginPath(); ctx.ellipse(4,8,22,7,0.1,0,Math.PI*2); ctx.fill();
+  // 갈비뼈 힌트 (다이어트 중)
+  ctx.strokeStyle='rgba(90,140,180,0.4)'; ctx.lineWidth=1.5;
+  for(let i=0;i<4;i++){ctx.beginPath();ctx.moveTo(-6+i*6,4);ctx.lineTo(-4+i*6,12);ctx.stroke();}
+  // 분수공
+  ctx.fillStyle='#1a3a5a'; ctx.beginPath(); ctx.ellipse(22,-12,3,2,0,0,Math.PI*2); ctx.fill();
+  // 분수 물줄기
+  ctx.strokeStyle='#aaddff'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(22,-14); ctx.lineTo(20,-24); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22,-14); ctx.lineTo(24,-22); ctx.stroke();
+  // 작은 크릴 (의지의 간식)
+  ctx.fillStyle='#ffaaaa'; ctx.fillRect(30,2,5,3);
+  // 눈
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(24,0,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(24,0,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(25,-1,1,0,Math.PI*2); ctx.fill();
+}
+function drawAnglerfish(color) {
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.moveTo(-22,4); ctx.lineTo(-34,-8); ctx.lineTo(-34,16); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0,4,22,16,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#0d060f'; ctx.beginPath(); ctx.moveTo(-10,12); ctx.lineTo(18,10); ctx.lineTo(22,18); ctx.lineTo(-12,20); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#f0f0e8';
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.moveTo(-6+i*5,12);ctx.lineTo(-3+i*5,18);ctx.lineTo(-1+i*5,18);ctx.lineTo(i*5,12);ctx.closePath();ctx.fill();}
+  ctx.strokeStyle='#888'; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(10,-12); ctx.bezierCurveTo(16,-24,24,-26,26,-20); ctx.stroke();
+  ctx.fillStyle='#ffe066'; ctx.shadowColor='#ffdd00'; ctx.shadowBlur=10;
+  ctx.beginPath(); ctx.arc(26,-20,5,0,Math.PI*2); ctx.fill(); ctx.shadowBlur=0;
+  ctx.fillStyle='#fff8'; ctx.beginPath(); ctx.arc(24,-22,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(14,-4,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ee2200'; ctx.beginPath(); ctx.arc(14,-4,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(14,-4,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawKraken(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,-4,24,20,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=color; ctx.lineWidth=5; ctx.lineCap='round';
+  for(let i=0;i<8;i++){const ang=(i/7-0.5)*Math.PI,ex=Math.cos(ang)*38,ey=Math.sin(ang)*12+24,cx1=Math.cos(ang)*16,cy1=16+Math.sin(ang)*4;ctx.beginPath();ctx.moveTo(0,14);ctx.bezierCurveTo(cx1,cy1,ex*0.7,ey*0.7,ex,ey);ctx.stroke();}
+  ctx.fillStyle='#ff6688';
+  for(let i=1;i<8;i+=2){const ang=(i/7-0.5)*Math.PI;ctx.beginPath();ctx.arc(Math.cos(ang)*28,Math.sin(ang)*9+20,2.5,0,Math.PI*2);ctx.fill();}
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-8,-8,6,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(8,-8,6,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#cc0000'; ctx.beginPath(); ctx.arc(-8,-8,4,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(8,-8,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(-7,-8,2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(9,-8,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(80,0,100,0.2)'; ctx.beginPath(); ctx.arc(0,0,32,0,Math.PI*2); ctx.fill();
+}
+
+// ========== 민물 물고기 형태 ==========
+function drawCatfish(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,20,9,0,0,Math.PI*2); ctx.fill();
+  // 납작한 큰 머리
+  ctx.beginPath(); ctx.ellipse(16,0,10,7,-0.1,0,Math.PI*2); ctx.fill();
+  // 꼬리
+  ctx.beginPath(); ctx.moveTo(-20,0); ctx.lineTo(-30,-10); ctx.lineTo(-28,0); ctx.lineTo(-30,10); ctx.closePath(); ctx.fill();
+  // 수염 4개
+  ctx.strokeStyle=color+'cc'; ctx.lineWidth=1.5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(22,-2); ctx.lineTo(34,-8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22,-2); ctx.lineTo(36,-2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22,2); ctx.lineTo(34,8); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22,2); ctx.lineTo(36,4); ctx.stroke();
+  // 눈 (졸린)
+  ctx.fillStyle='#fff'; ctx.fillRect(18,-4,5,4);
+  ctx.fillStyle='#000'; ctx.fillRect(19,-3,3,2);
+  ctx.fillStyle=color; ctx.fillRect(18,-4,5,2); // 졸린 눈꺼풀
+  // 등지느러미
+  ctx.fillStyle=color+'bb'; ctx.beginPath(); ctx.moveTo(2,-9); ctx.lineTo(6,-16); ctx.lineTo(10,-9); ctx.closePath(); ctx.fill();
+}
+function drawPiranha(color) {
+  // 몸통 (통통)
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,16,13,0,0,Math.PI*2); ctx.fill();
+  // 배 (은색)
+  ctx.fillStyle='#ddd'; ctx.beginPath(); ctx.ellipse(2,4,10,7,0.2,0,Math.PI*2); ctx.fill();
+  // 빨간 줄
+  ctx.fillStyle='#ff2222'; ctx.fillRect(-12,1,24,3);
+  // 꼬리
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-16,0); ctx.lineTo(-26,-8); ctx.lineTo(-26,8); ctx.closePath(); ctx.fill();
+  // 거대한 아래턱 (입)
+  ctx.fillStyle='#1a0808'; ctx.beginPath(); ctx.moveTo(-8,6); ctx.lineTo(12,6); ctx.lineTo(14,12); ctx.lineTo(-10,13); ctx.closePath(); ctx.fill();
+  // 삐죽 이빨
+  ctx.fillStyle='#fff';
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.moveTo(-5+i*4,6);ctx.lineTo(-3+i*4,11);ctx.lineTo(-1+i*4,6);ctx.closePath();ctx.fill();}
+  // 눈 (분노)
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(8,-2,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ff0000'; ctx.beginPath(); ctx.arc(8,-2,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(8,-2,1.2,0,Math.PI*2); ctx.fill();
+  // 분노 눈썹
+  ctx.strokeStyle='#000'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(4,-6); ctx.lineTo(10,-8); ctx.stroke();
+}
+function drawCarp(color) {
+  // 통통한 둥근 몸통
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,18,14,0,0,Math.PI*2); ctx.fill();
+  // 비늘 무늬
+  ctx.strokeStyle=color+'88'; ctx.lineWidth=1;
+  for(let i=0;i<3;i++){for(let j=0;j<4;j++){ctx.beginPath();ctx.arc(-10+j*8+i%2*4,-6+i*6,5,0,Math.PI*2);ctx.stroke();}}
+  // 꼬리 (화려)
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-18,0); ctx.lineTo(-30,-10); ctx.lineTo(-26,0); ctx.lineTo(-30,10); ctx.closePath(); ctx.fill();
+  // 입술
+  ctx.fillStyle='#e8a0a0'; ctx.beginPath(); ctx.ellipse(17,2,4,3,0,0,Math.PI*2); ctx.fill();
+  // 수염 (잉어)
+  ctx.strokeStyle=color+'cc'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(16,-1); ctx.lineTo(24,-6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(16,1); ctx.lineTo(24,5); ctx.stroke();
+  // 눈
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(12,-3,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(12,-3,1.5,0,Math.PI*2); ctx.fill();
+  // 마이크 (노래방)
+  ctx.fillStyle='#555'; ctx.fillRect(16,5,2,8); ctx.beginPath(); ctx.arc(17,4,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#888'; ctx.beginPath(); ctx.arc(17,4,2,0,Math.PI*2); ctx.fill();
+}
+function drawCrayfish(color) {
+  // 긴 복부 (꼬리)
+  ctx.fillStyle=color;
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.ellipse(-14+i*7,2,4,5,0,0,Math.PI*2);ctx.fill();}
+  // 꼬리 팬
+  ctx.beginPath(); ctx.moveTo(-16,2); ctx.lineTo(-24,-6); ctx.lineTo(-22,2); ctx.lineTo(-24,10); ctx.closePath(); ctx.fill();
+  // 등딱지
+  ctx.beginPath(); ctx.ellipse(10,-1,14,9,0,0,Math.PI*2); ctx.fill();
+  // 큰 집게
+  ctx.beginPath(); ctx.moveTo(20,-2); ctx.lineTo(30,-10); ctx.lineTo(34,-6); ctx.lineTo(32,2); ctx.lineTo(24,4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#8a1a1a'; ctx.beginPath(); ctx.arc(33,-2,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(20,-2); ctx.lineTo(28,-8); ctx.lineTo(30,-4); ctx.lineTo(26,2); ctx.closePath(); ctx.fill();
+  // 다리 (작은 것들)
+  ctx.strokeStyle=color; ctx.lineWidth=1.5;
+  for(let i=0;i<4;i++){ctx.beginPath();ctx.moveTo(2+i*4,6);ctx.lineTo(0+i*4,14);ctx.stroke();}
+  // 더듬이
+  ctx.strokeStyle=color+'cc'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(22,-6); ctx.lineTo(36,-18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(22,-6); ctx.lineTo(34,-12); ctx.stroke();
+  // 눈
+  ctx.fillStyle='#000'; ctx.fillRect(18,-9,2,4); ctx.fillRect(22,-9,2,4);
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(19,-10,2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(23,-10,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(19,-10,1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(23,-10,1,0,Math.PI*2); ctx.fill();
+}
+function drawSturgeon(color) {
+  // 긴 몸통
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,26,9,0,0,Math.PI*2); ctx.fill();
+  // 뾰족한 주둥이 (rostrum)
+  ctx.beginPath(); ctx.moveTo(20,-4); ctx.lineTo(42,0); ctx.lineTo(20,4); ctx.closePath(); ctx.fill();
+  // 등 갑각판 (scutes)
+  ctx.fillStyle='#8888aa';
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.moveTo(-14+i*8,-9);ctx.lineTo(-10+i*8,-16);ctx.lineTo(-6+i*8,-9);ctx.closePath();ctx.fill();}
+  // 꼬리 (이형미부)
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-26,0); ctx.lineTo(-38,-12); ctx.lineTo(-34,0); ctx.lineTo(-38,12); ctx.closePath(); ctx.fill();
+  // 한정판 스티커
+  ctx.fillStyle='#ff4444'; ctx.beginPath(); ctx.arc(4,-9,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.font=`bold ${fz(5)}px monospace`; ctx.textAlign='center'; ctx.fillText('LTD',4,-7); ctx.textAlign='left';
+  // 수염
+  ctx.strokeStyle=color+'cc'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(30,-2); ctx.lineTo(38,-6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(30,2); ctx.lineTo(38,6); ctx.stroke();
+  // 눈
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(18,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(18,-2,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawSalmon(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,20,9,0,0,Math.PI*2); ctx.fill();
+  // 혹 (등 혹)
+  ctx.beginPath(); ctx.ellipse(6,-6,12,7,0.4,0,Math.PI*2); ctx.fill();
+  // 꼬리
+  ctx.beginPath(); ctx.moveTo(-20,0); ctx.lineTo(-32,-9); ctx.lineTo(-28,0); ctx.lineTo(-32,9); ctx.closePath(); ctx.fill();
+  // 배 (연한)
+  ctx.fillStyle='#f0d0b8'; ctx.beginPath(); ctx.ellipse(2,4,14,5,0,0,Math.PI*2); ctx.fill();
+  // 반점
+  ctx.fillStyle='#8b3a1a';
+  for(let i=0;i<6;i++){const sx=Math.cos(i*1.2)*12,sy=Math.sin(i*1.2)*5-2;ctx.beginPath();ctx.arc(sx,sy,1.5,0,Math.PI*2);ctx.fill();}
+  // 갈고리 주둥이 (kype)
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(18,-2); ctx.lineTo(28,2); ctx.lineTo(26,6); ctx.lineTo(14,4); ctx.closePath(); ctx.fill();
+  // 명상하는 눈 (심오한 표정)
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(16,-3,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(16,-3,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(15,-4,0.8,0,Math.PI*2); ctx.fill();
+  // 등지느러미
+  ctx.fillStyle=color+'cc'; ctx.beginPath(); ctx.moveTo(2,-9); ctx.lineTo(6,-17); ctx.lineTo(10,-9); ctx.closePath(); ctx.fill();
+}
+
+// ========== 신규 바다 물고기 ==========
+function drawClownfish(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,16,11,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.moveTo(-4,-11); ctx.lineTo(-2,11); ctx.lineTo(2,11); ctx.lineTo(4,-11); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(8,-10); ctx.lineTo(9,10); ctx.lineTo(11,10); ctx.lineTo(12,-10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#000'; ctx.lineWidth=1.5; ctx.strokeStyle='#000';
+  ctx.beginPath(); ctx.moveTo(-5,-11); ctx.lineTo(-3,11); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(5,-11); ctx.lineTo(3,11); ctx.stroke();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-16,0); ctx.lineTo(-24,-8); ctx.lineTo(-22,0); ctx.lineTo(-24,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(11,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(11,-2,1.8,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(12,-3,0.8,0,Math.PI*2); ctx.fill();
+}
+function drawJellycold(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,-6,14,10,0,0,Math.PI); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.3)'; ctx.beginPath(); ctx.ellipse(-4,-9,5,4,0.3,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.lineCap='round';
+  for(let i=-10;i<=10;i+=4){ctx.beginPath();ctx.moveTo(i,4);ctx.bezierCurveTo(i-2,12,i+2,18,i,24);ctx.stroke();}
+  ctx.strokeStyle='rgba(200,240,255,0.5)'; ctx.lineWidth=1;
+  for(let i=-8;i<=8;i+=8){ctx.beginPath();ctx.moveTo(i,4);ctx.lineTo(i+1,16);ctx.stroke();}
+  ctx.fillStyle='rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.ellipse(0,-10,3,2,0,0,Math.PI*2); ctx.fill();
+}
+function drawMoray(color) {
+  ctx.strokeStyle=color; ctx.lineWidth=9; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-28,0); ctx.bezierCurveTo(-18,-12,0,12,14,-6); ctx.stroke();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(18,-5,10,7,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ffee88'; ctx.beginPath(); ctx.ellipse(18,-5,7,5,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#2a5a1a'; ctx.lineWidth=1.5;
+  for(let i=0;i<4;i++){ctx.beginPath();ctx.moveTo(-12+i*8,-2);ctx.lineTo(-10+i*8,4);ctx.stroke();}
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.moveTo(22,-8); ctx.lineTo(32,-6); ctx.lineTo(28,-2); ctx.lineTo(18,-3); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(22+i*2,-8);ctx.lineTo(23+i*2,-5);ctx.lineTo(24+i*2,-8);ctx.closePath();ctx.fill();}
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(22,-10,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(22,-10,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawFlyingfish(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,20,6,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color+'cc';
+  ctx.beginPath(); ctx.moveTo(-6,-6); ctx.lineTo(-20,-20); ctx.lineTo(6,-6); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-6,-6); ctx.lineTo(-18,-14); ctx.lineTo(4,-6); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-6,6); ctx.lineTo(-14,12); ctx.lineTo(2,6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(180,220,255,0.4)';
+  ctx.beginPath(); ctx.moveTo(-6,-6); ctx.lineTo(-20,-20); ctx.lineTo(6,-6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-20,0); ctx.lineTo(-30,-6); ctx.lineTo(-28,0); ctx.lineTo(-30,6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(16,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(16,-2,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawFlatfish(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,4,22,10,-0.1,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color+'dd'; ctx.beginPath(); ctx.ellipse(0,4,18,7,-0.1,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,0.15)'; ctx.lineWidth=1;
+  for(let i=-16;i<=16;i+=5){ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i+1,9);ctx.stroke();}
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(14,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(17,-5,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(14,-2,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(17,-5,1.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-22,4); ctx.lineTo(-32,-2); ctx.lineTo(-30,4); ctx.lineTo(-32,10); ctx.closePath(); ctx.fill();
+}
+function drawRockfish(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,18,12,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color+'aa';
+  ctx.beginPath(); ctx.moveTo(-10,-12); ctx.lineTo(-6,-20); ctx.lineTo(-2,-12); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-2,-12); ctx.lineTo(2,-20); ctx.lineTo(6,-12); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(6,-12); ctx.lineTo(10,-18); ctx.lineTo(14,-12); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-18,0); ctx.lineTo(-28,-8); ctx.lineTo(-26,0); ctx.lineTo(-28,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(12,-2,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(12,-2,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(0,0,255,0.5)'; ctx.beginPath(); ctx.arc(12,-2,1.5,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(0,100,200,0.4)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(8,-4); ctx.lineTo(6,-9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(12,-6); ctx.lineTo(11,-11); ctx.stroke();
+}
+function drawSunfish(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,18,20,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(200,200,200,0.3)'; ctx.beginPath(); ctx.ellipse(-2,2,12,14,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.moveTo(0,-20); ctx.lineTo(-6,-30); ctx.lineTo(6,-30); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(0,20); ctx.lineTo(-6,30); ctx.lineTo(6,30); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(18,0); ctx.lineTo(28,-6); ctx.lineTo(26,6); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(120,120,120,0.2)'; ctx.beginPath(); ctx.ellipse(0,0,18,20,0,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(8,-4,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(8,-4,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(8,-4,1,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(9,-5,0.8,0,Math.PI*2); ctx.fill();
+}
+function drawMermaid(color) {
+  ctx.fillStyle='#f0c8a0';
+  ctx.beginPath(); ctx.ellipse(0,-10,8,12,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#cc6688';
+  ctx.beginPath(); ctx.ellipse(-4,-18,7,5,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(4,-18,7,5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.ellipse(0,6,8,14,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color+'99';
+  ctx.beginPath(); ctx.moveTo(-8,18); ctx.lineTo(-14,26); ctx.lineTo(-4,24); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(8,18); ctx.lineTo(14,26); ctx.lineTo(4,24); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#f0c8a0';
+  ctx.beginPath(); ctx.moveTo(-12,-8); ctx.bezierCurveTo(-18,0,-16,8,-12,10); ctx.lineTo(-8,0); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(12,-8); ctx.bezierCurveTo(18,0,16,8,12,10); ctx.lineTo(8,0); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#442200'; ctx.strokeStyle='#442200'; ctx.lineWidth=2;
+  for(let i=-6;i<=6;i+=4){ctx.beginPath();ctx.moveTo(i,-24);ctx.bezierCurveTo(i-2,-18,i+1,-12,i,-8);ctx.stroke();}
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-3,-11,2,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(3,-11,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#5a8aaa'; ctx.beginPath(); ctx.arc(-3,-11,1.2,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(3,-11,1.2,0,Math.PI*2); ctx.fill();
+}
+function drawRainbowDolphin(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,28,12,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-28,0); ctx.lineTo(-40,-10); ctx.lineTo(-36,0); ctx.lineTo(-40,10); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(4,-12); ctx.lineTo(12,-22); ctx.lineTo(16,-12); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.beginPath(); ctx.ellipse(2,6,18,6,0,0,Math.PI*2); ctx.fill();
+  const rainbow=['#ff4444','#ff9944','#ffee44','#44cc44','#4488ff','#9944ff'];
+  for(let i=0;i<6;i++){
+    ctx.strokeStyle=rainbow[i]; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.moveTo(-10+i*4,-12-(i*2)); ctx.bezierCurveTo(-6+i*4,-22-(i*2),2+i*4,-24-(i*2),8+i*4,-16-(i*2)); ctx.stroke();
+  }
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(20,-2,4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(20,-2,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(21,-3,1,0,Math.PI*2); ctx.fill();
+}
+function drawSpongebob(color) {
+  ctx.fillStyle=color; ctx.fillRect(-16,-20,32,32);
+  ctx.strokeStyle='#c8a020'; ctx.lineWidth=2; ctx.strokeRect(-16,-20,32,32);
+  ctx.fillStyle='rgba(200,150,20,0.3)';
+  [[-12,-16,5,5],[-4,-14,4,6],[4,-16,5,4],[-10,-8,4,5],[-1,-7,5,5],[7,-9,4,4],[-13,0,5,5],[-4,1,4,5],[5,0,5,5]].forEach(([x,y,w,h])=>{ ctx.beginPath();ctx.arc(x+w/2,y+h/2,Math.min(w,h)/2,0,Math.PI*2);ctx.fill(); });
+  ctx.fillStyle='#fff'; ctx.fillRect(-10,-18,8,8);
+  ctx.fillRect(2,-18,8,8);
+  ctx.fillStyle='#4488ff'; ctx.fillRect(-8,-16,4,4); ctx.fillRect(4,-16,4,4);
+  ctx.fillStyle='#000'; ctx.fillRect(-7,-15,2,2); ctx.fillRect(5,-15,2,2);
+  ctx.fillStyle='#f0c8a0'; ctx.fillRect(-10,4,6,10);
+  ctx.fillStyle='#fff'; ctx.fillRect(-14,8,28,6); ctx.fillRect(-12,6,24,3);
+  ctx.fillStyle='#fff'; for(let i=0;i<8;i++) ctx.fillRect(-12+i*3,8,2,5);
+  ctx.fillStyle='#dda0a0'; ctx.fillRect(-14,5,4,6); ctx.fillRect(10,5,4,6);
+}
+function drawPatrick(color) {
+  const pk='#f4846e';
+  // 5각 별 몸통
+  ctx.fillStyle=pk;
+  ctx.beginPath();
+  for(let i=0;i<10;i++){
+    const ang=(i/10)*Math.PI*2-Math.PI/2;
+    const r=i%2===0?24:10;
+    if(i===0) ctx.moveTo(Math.cos(ang)*r,Math.sin(ang)*r);
+    else ctx.lineTo(Math.cos(ang)*r,Math.sin(ang)*r);
+  }
+  ctx.closePath(); ctx.fill();
+  // 배 연한 부분
+  ctx.fillStyle='rgba(255,210,190,0.4)';
+  ctx.beginPath(); ctx.ellipse(0,2,10,8,0,0,Math.PI*2); ctx.fill();
+  // 초록 팬티 (하단 별 팁 두 개 사이)
+  ctx.fillStyle='#4a9a28';
+  ctx.beginPath(); ctx.moveTo(-11,8); ctx.lineTo(11,8); ctx.lineTo(9,20); ctx.lineTo(-9,20); ctx.closePath(); ctx.fill();
+  // 보라 꽃무늬
+  ctx.fillStyle='#8040bb';
+  ctx.beginPath(); ctx.arc(-4,14,3,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(4,14,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ffe066';
+  ctx.beginPath(); ctx.arc(-4,14,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(4,14,1.5,0,Math.PI*2); ctx.fill();
+  // 눈 (큰 흰 동그라미)
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.arc(-5,-4,6,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(5,-4,6,0,Math.PI*2); ctx.fill();
+  // 검은 눈동자
+  ctx.fillStyle='#111';
+  ctx.beginPath(); ctx.arc(-4,-3,3.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(6,-3,3.5,0,Math.PI*2); ctx.fill();
+  // 하이라이트
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.arc(-2.5,-4.5,1.5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(7.5,-4.5,1.5,0,Math.PI*2); ctx.fill();
+  // 코
+  ctx.fillStyle='#d87060'; ctx.beginPath(); ctx.ellipse(1,0,2.5,1.8,0,0,Math.PI*2); ctx.fill();
+  // 웃는 입
+  ctx.fillStyle='#cc1818';
+  ctx.beginPath(); ctx.moveTo(-8,4); ctx.quadraticCurveTo(0,15,8,4); ctx.closePath(); ctx.fill();
+  // 이빨
+  ctx.fillStyle='#fff';
+  ctx.fillRect(-6,4,4,4); ctx.fillRect(-1,4,4,4); ctx.fillRect(4,4,3.5,4);
+}
+function drawBlueWhale(color) {
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.ellipse(0,0,42,18,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-38,0); ctx.lineTo(-56,-16); ctx.lineTo(-50,0); ctx.lineTo(-56,16); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(6,-18); ctx.quadraticCurveTo(14,-30,20,-18); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(10,12); ctx.lineTo(-4,28); ctx.lineTo(18,22); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#4a6a9a'; ctx.beginPath(); ctx.ellipse(4,10,28,8,0.1,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(100,150,220,0.35)'; ctx.lineWidth=2;
+  for(let i=0;i<6;i++){ctx.beginPath();ctx.moveTo(-18+i*8,4);ctx.lineTo(-15+i*8,14);ctx.stroke();}
+  ctx.fillStyle='#1a2a4a'; ctx.beginPath(); ctx.ellipse(30,-18,4,3,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#88ccff'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(30,-20); ctx.lineTo(27,-34); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(30,-20); ctx.lineTo(33,-32); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(30,-20); ctx.lineTo(30,-36); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(34,2,5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(34,2,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(35,1,1.2,0,Math.PI*2); ctx.fill();
+}
+
+// ========== 신규 민물 물고기 ==========
+function drawPlainbass(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,18,10,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,0.1)'; ctx.strokeStyle='rgba(0,0,0,0.12)'; ctx.lineWidth=1;
+  for(let i=-12;i<=12;i+=4){ctx.beginPath();ctx.arc(i,0,5,0,Math.PI*2);ctx.stroke();}
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-18,0); ctx.lineTo(-28,-8); ctx.lineTo(-26,0); ctx.lineTo(-28,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=color+'cc'; ctx.beginPath(); ctx.moveTo(-4,-10); ctx.lineTo(0,-18); ctx.lineTo(4,-10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(14,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(14,-2,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawBluegill(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,17,13,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#44aaff'; ctx.beginPath(); ctx.ellipse(-14,2,6,5,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(0,50,150,0.3)'; ctx.lineWidth=1;
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.arc(-6+i*5,0,6,0,Math.PI*2);ctx.stroke();}
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-17,0); ctx.lineTo(-28,-7); ctx.lineTo(-26,0); ctx.lineTo(-28,7); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#44aaff'; ctx.beginPath(); ctx.moveTo(-2,-13); ctx.lineTo(2,-20); ctx.lineTo(6,-13); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(12,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(12,-2,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawMinnow(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,14,6,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(200,220,200,0.5)'; ctx.beginPath(); ctx.ellipse(2,3,9,3,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(100,150,100,0.5)'; ctx.lineWidth=0.8;
+  ctx.beginPath(); ctx.moveTo(-14,0); ctx.lineTo(14,0); ctx.stroke();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-14,0); ctx.lineTo(-20,-5); ctx.lineTo(-18,0); ctx.lineTo(-20,5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(11,-1,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(11,-1,1,0,Math.PI*2); ctx.fill();
+}
+function drawMullet(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,20,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(200,220,240,0.4)'; ctx.beginPath(); ctx.ellipse(2,4,13,5,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(80,100,120,0.25)'; ctx.lineWidth=1;
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.arc(-10+i*6,-1,5,0,Math.PI*2);ctx.stroke();}
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-20,0); ctx.lineTo(-30,-8); ctx.lineTo(-28,0); ctx.lineTo(-30,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=color+'cc'; ctx.beginPath(); ctx.moveTo(-2,-9); ctx.lineTo(2,-16); ctx.lineTo(6,-9); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(16,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(16,-2,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawGoldfish(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,12,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color+'cc';
+  ctx.beginPath(); ctx.moveTo(-12,0); ctx.lineTo(-20,-10); ctx.lineTo(-14,-4); ctx.lineTo(-20,10); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-4,-9); ctx.lineTo(-8,-16); ctx.lineTo(0,-9); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(4,-8); ctx.lineTo(8,-14); ctx.lineTo(10,-8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,180,100,0.4)'; ctx.strokeStyle='rgba(200,100,20,0.3)'; ctx.lineWidth=1;
+  for(let i=-8;i<=8;i+=4){ctx.beginPath();ctx.arc(i,0,4,0,Math.PI*2);ctx.stroke();}
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(10,-2,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(10,-2,1.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(11,-3,0.7,0,Math.PI*2); ctx.fill();
+}
+function drawTrout(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,20,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.25)'; ctx.beginPath(); ctx.ellipse(2,4,13,5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#a06080'; ctx.strokeStyle='#a06080'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(-12,-8); ctx.lineTo(12,-8); ctx.stroke();
+  ctx.fillStyle='#8b4560';
+  for(let i=0;i<7;i++){ctx.beginPath();ctx.arc(-12+i*4,-3+Math.sin(i)*3,1.8,0,Math.PI*2);ctx.fill();}
+  for(let i=0;i<5;i++){ctx.beginPath();ctx.arc(-8+i*4,2+Math.cos(i)*2,1.5,0,Math.PI*2);ctx.fill();}
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-20,0); ctx.lineTo(-30,-8); ctx.lineTo(-28,0); ctx.lineTo(-30,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(16,-2,3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#333'; ctx.beginPath(); ctx.arc(16,-2,1.5,0,Math.PI*2); ctx.fill();
+}
+function drawSnakehead(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,22,8,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color+'dd'; ctx.beginPath(); ctx.ellipse(16,0,10,6,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,0.2)'; ctx.lineWidth=1.2;
+  for(let i=-14;i<=14;i+=5){ctx.beginPath();ctx.arc(i,-2,4,0,Math.PI*2);ctx.stroke();}
+  ctx.fillStyle='#222'; ctx.beginPath(); ctx.moveTo(18,-4); ctx.lineTo(30,-3); ctx.lineTo(30,3); ctx.lineTo(18,4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(20+i*2,-4);ctx.lineTo(21+i*2,-1);ctx.lineTo(22+i*2,-4);ctx.closePath();ctx.fill();}
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-22,0); ctx.lineTo(-32,-8); ctx.lineTo(-30,0); ctx.lineTo(-32,8); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(22,-5,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ee0000'; ctx.beginPath(); ctx.arc(22,-5,1.5,0,Math.PI*2); ctx.fill();
+}
+function _drawBreadBody() {
+  // 붕어빵 기본 몸통 (가로 잉어 실루엣) — 호출 전 color 세팅 필요
+  // 몸통 (구운 빵 외피)
+  ctx.beginPath();
+  ctx.moveTo(20,0);
+  ctx.bezierCurveTo(20,-14,4,-18,-8,-12);
+  ctx.bezierCurveTo(-18,-8,-18,8,-8,12);
+  ctx.bezierCurveTo(4,18,20,14,20,0);
+  ctx.closePath(); ctx.fill();
+  // 꼬리 (갈라진 부채형)
+  ctx.beginPath(); ctx.moveTo(-8,-8); ctx.lineTo(-22,-18); ctx.lineTo(-18,-4); ctx.lineTo(-22,16); ctx.lineTo(-8,8); ctx.closePath(); ctx.fill();
+  // 등지느러미
+  ctx.fillStyle='rgba(0,0,0,0.15)';
+  ctx.beginPath(); ctx.moveTo(4,-18); ctx.lineTo(8,-27); ctx.lineTo(14,-18); ctx.closePath(); ctx.fill();
+}
+function drawBreadfishRed(color) {
+  // 팥붕어빵 — 구운 황금빛 + 팥 속
+  ctx.fillStyle='#c8721a'; _drawBreadBody();
+  // 빵 틀 눌림 자국 (격자)
+  ctx.save(); ctx.beginPath();
+  ctx.moveTo(20,0); ctx.bezierCurveTo(20,-14,4,-18,-8,-12); ctx.bezierCurveTo(-18,-8,-18,8,-8,12); ctx.bezierCurveTo(4,18,20,14,20,0); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle='#8a4410'; ctx.lineWidth=1.2;
+  for(let x=-20;x<=22;x+=6){ctx.beginPath();ctx.moveTo(x,-20);ctx.lineTo(x,20);ctx.stroke();}
+  for(let y=-16;y<=16;y+=6){ctx.beginPath();ctx.moveTo(-22,y);ctx.lineTo(22,y);ctx.stroke();}
+  ctx.restore();
+  // 팥 속 (입 부분에서 살짝 보임)
+  ctx.fillStyle='#6a1a1a'; ctx.beginPath(); ctx.ellipse(17,0,5,4,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#a03030'; ctx.beginPath(); ctx.ellipse(16,0,3,2.5,0,0,Math.PI*2); ctx.fill();
+  // 비늘 무늬 (몰드 자국)
+  ctx.strokeStyle='rgba(100,50,10,0.35)'; ctx.lineWidth=1;
+  for(let i=0;i<3;i++){for(let j=0;j<4;j++){ctx.beginPath();ctx.arc(-8+j*7+i%2*3,-7+i*6,5,0.2,Math.PI-0.2);ctx.stroke();}}
+  // 눈
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(16,-7,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(17,-8,1,0,Math.PI*2); ctx.fill();
+}
+function drawBreadfishCream(color) {
+  // 슈크림붕어빵 — 밝은 황금빛 + 슈크림 속
+  ctx.fillStyle='#e8a030'; _drawBreadBody();
+  ctx.save(); ctx.beginPath();
+  ctx.moveTo(20,0); ctx.bezierCurveTo(20,-14,4,-18,-8,-12); ctx.bezierCurveTo(-18,-8,-18,8,-8,12); ctx.bezierCurveTo(4,18,20,14,20,0); ctx.closePath(); ctx.clip();
+  ctx.strokeStyle='#b07020'; ctx.lineWidth=1.2;
+  for(let x=-20;x<=22;x+=6){ctx.beginPath();ctx.moveTo(x,-20);ctx.lineTo(x,20);ctx.stroke();}
+  for(let y=-16;y<=16;y+=6){ctx.beginPath();ctx.moveTo(-22,y);ctx.lineTo(22,y);ctx.stroke();}
+  ctx.restore();
+  // 슈크림 속 (노란 크림이 입에서 삐져나옴)
+  ctx.fillStyle='#fffaaa'; ctx.beginPath(); ctx.ellipse(18,0,6,5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ffe050'; ctx.beginPath(); ctx.ellipse(17,0,4,3,0,0,Math.PI*2); ctx.fill();
+  // 비늘
+  ctx.strokeStyle='rgba(140,80,10,0.3)'; ctx.lineWidth=1;
+  for(let i=0;i<3;i++){for(let j=0;j<4;j++){ctx.beginPath();ctx.arc(-8+j*7+i%2*3,-7+i*6,5,0.2,Math.PI-0.2);ctx.stroke();}}
+  // 눈
+  ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(16,-7,2.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(17,-8,1,0,Math.PI*2); ctx.fill();
+}
+function drawGiantMudfish(color) {
+  ctx.strokeStyle=color; ctx.lineWidth=14; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-24,0); ctx.bezierCurveTo(-14,-10,2,12,18,-4); ctx.stroke();
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(22,-3,12,8,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=color+'cc'; ctx.beginPath(); ctx.ellipse(22,-3,9,6,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(0,0,0,0.15)'; ctx.lineWidth=1.5;
+  for(let i=-10;i<=16;i+=5){ctx.beginPath();ctx.moveTo(i,-5);ctx.lineTo(i+1,3);ctx.stroke();}
+  ctx.fillStyle='#fff'; ctx.fillRect(22,-6,6,4);
+  ctx.fillStyle='#000'; ctx.fillRect(23,-5,4,2);
+  ctx.fillStyle=color; ctx.fillRect(22,-6,6,2);
+  ctx.strokeStyle=color+'cc'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(28,-2); ctx.lineTo(36,-6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(28,1); ctx.lineTo(36,4); ctx.stroke();
+}
+function drawGoldenCarp(color) {
+  ctx.fillStyle=color; ctx.beginPath(); ctx.ellipse(0,0,22,14,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='#ffa000'; ctx.lineWidth=1.5;
+  for(let i=0;i<4;i++){for(let j=0;j<5;j++){ctx.beginPath();ctx.arc(-12+j*7+i%2*3,-7+i*5,5,0,Math.PI*2);ctx.stroke();}}
+  ctx.fillStyle=color; ctx.beginPath(); ctx.moveTo(-22,0); ctx.lineTo(-34,-12); ctx.lineTo(-28,0); ctx.lineTo(-34,12); ctx.closePath(); ctx.fill();
+  ctx.fillStyle=color+'cc'; ctx.beginPath(); ctx.moveTo(-4,-14); ctx.lineTo(0,-24); ctx.lineTo(4,-14); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(255,230,50,0.5)'; ctx.beginPath(); ctx.ellipse(0,0,22,14,0,0,Math.PI*2); ctx.fill();
+  ctx.shadowColor='#ffdd00'; ctx.shadowBlur=12;
+  ctx.strokeStyle='#ffe500'; ctx.lineWidth=2; ctx.strokeRect(-22,-14,44,28);
+  ctx.shadowBlur=0;
+  ctx.fillStyle='#e8a0a0'; ctx.beginPath(); ctx.ellipse(18,2,4,3,0,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle=color+'cc'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(20,-2); ctx.lineTo(28,-6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(20,2); ctx.lineTo(28,6); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(12,-2,3.5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(12,-2,2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(13,-3,0.8,0,Math.PI*2); ctx.fill();
+}
+
+// ========== 미니 아이콘 ==========
+function miniShape(c, fish) {
+  c.fillStyle=fish.color;
+  if (fish.shape==='shark') {
+    c.beginPath();c.ellipse(0,0,14,5,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(-14,0);c.lineTo(-20,-6);c.lineTo(-20,6);c.closePath();c.fill();
+    c.fillStyle='#ff9eb5';c.fillRect(8,-1,9,5);c.fillStyle='#fff';
+    for(let i=0;i<4;i++)c.fillRect(9+i*2,0,1,3);c.fillStyle='#000';c.fillRect(5,-2,1,1);
+  } else if (fish.shape==='octopus') {
+    c.beginPath();c.arc(0,-3,9,0,Math.PI*2);c.fill();
+    c.fillStyle='#1a0a05';for(let i=-6;i<=6;i+=2)c.fillRect(i,-12,1,3);
+    c.strokeStyle=fish.color;c.lineWidth=1.5;
+    for(let i=0;i<8;i++){const ang=(i/7-0.5)*Math.PI;c.beginPath();c.moveTo(0,3);c.lineTo(Math.cos(ang)*9,Math.sin(ang)*3+8);c.stroke();}
+    c.fillStyle='#fff';c.fillRect(-3,-4,2,2);c.fillRect(2,-4,2,2);
+  } else if (fish.shape==='jelly') {
+    c.beginPath();c.moveTo(-8,-2);c.lineTo(8,-2);c.lineTo(6,-8);c.lineTo(-6,-8);c.closePath();c.fill();
+    c.strokeStyle='#5a3a1a';c.stroke();c.fillStyle='#f5d76e';
+    for(let i=-6;i<=6;i+=3)c.fillRect(i,-2,1,8);
+  } else if (fish.shape==='bass') {
+    c.beginPath();c.ellipse(0,1,16,10,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(-5,-10);c.lineTo(-1,-17);c.lineTo(6,-10);c.closePath();c.fill();
+    c.fillStyle='#c8a030';c.beginPath();c.moveTo(-16,0);c.lineTo(-22,-7);c.lineTo(-20,0);c.lineTo(-22,7);c.closePath();c.fill();
+    c.fillStyle='rgba(255,255,248,0.82)';c.beginPath();c.ellipse(2,5,10,5,0.15,0,Math.PI*2);c.fill();
+    c.strokeStyle='rgba(255,255,240,0.95)';c.lineWidth=2;c.lineCap='round';
+    c.beginPath();c.moveTo(-5,4);c.bezierCurveTo(0,2,5,6,9,3);c.stroke();
+    c.fillStyle='#fff';c.beginPath();c.arc(10,-1,2.5,0,Math.PI*2);c.fill();
+    c.fillStyle='#000';c.beginPath();c.arc(10,-1,1.2,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='squid') {
+    c.beginPath();c.ellipse(0,-4,10,8,0,Math.PI,0,true);c.fill();
+    c.fillStyle='#d7bad7';c.beginPath();c.moveTo(-10,-4);c.lineTo(-14,8);c.lineTo(-6,6);c.lineTo(-2,10);c.lineTo(2,6);c.lineTo(6,10);c.lineTo(10,6);c.lineTo(14,8);c.closePath();c.fill();
+  } else if (fish.shape==='manta') {
+    // 윗 날개
+    c.beginPath();c.moveTo(18,0);c.bezierCurveTo(10,-10,-4,-26,-16,-23);c.bezierCurveTo(-26,-17,-22,-6,-14,0);c.closePath();c.fill();
+    // 아래 날개
+    c.beginPath();c.moveTo(18,0);c.bezierCurveTo(10,10,-4,26,-16,23);c.bezierCurveTo(-26,17,-22,6,-14,0);c.closePath();c.fill();
+    // 몸통
+    c.beginPath();c.ellipse(2,0,16,7,0,0,Math.PI*2);c.fill();
+    // 신문지 줄
+    c.strokeStyle='rgba(0,0,0,0.18)';c.lineWidth=0.8;
+    for(let y=-6;y<=6;y+=2){c.beginPath();c.moveTo(-14,y);c.lineTo(16,y);c.stroke();}
+    // cephalic fin
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(16,-2);c.bezierCurveTo(20,-7,22,-12,19,-15);c.bezierCurveTo(17,-9,16,-6,15,-3);c.closePath();c.fill();
+    c.beginPath();c.moveTo(16,2);c.bezierCurveTo(20,7,22,12,19,15);c.bezierCurveTo(17,9,16,6,15,3);c.closePath();c.fill();
+    c.fillStyle='rgba(255,255,255,0.28)';c.beginPath();c.ellipse(3,0,10,5,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(13,-3,2,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(13,-3,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='puffer') {
+    c.beginPath();c.arc(0,0,10,0,Math.PI*2);c.fill();
+    c.fillStyle='#ffd';for(let i=0;i<5;i++){const a=i*Math.PI*2/5;c.fillRect(Math.cos(a)*9,Math.sin(a)*9,1,2);}
+  } else if (fish.shape==='turtle') {
+    c.beginPath();c.ellipse(0,0,12,9,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#2c5030';c.fillRect(-4,-2,3,3);c.fillRect(3,-2,3,3);
+  } else if (fish.shape==='eel') {
+    c.strokeStyle=fish.color;c.lineWidth=7;c.lineCap='round';
+    c.beginPath();c.moveTo(-18,0);c.bezierCurveTo(-10,-9,4,9,14,-3);c.stroke();
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(18,-2,6,4,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.fillRect(19,-3,2,2);
+  } else if (fish.shape==='crab') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,2,12,8,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(12,0);c.lineTo(20,-5);c.lineTo(20,2);c.lineTo(14,4);c.closePath();c.fill();
+    c.beginPath();c.moveTo(-12,0);c.lineTo(-20,-5);c.lineTo(-20,2);c.lineTo(-14,4);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(-3,-9,2,0,Math.PI*2);c.fill();c.beginPath();c.arc(3,-9,2,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='shrimp') {
+    c.strokeStyle=fish.color;c.lineWidth=8;c.lineCap='round';
+    c.beginPath();c.moveTo(8,-2);c.bezierCurveTo(1,-7,-4,-6,-6,-1);c.bezierCurveTo(-9,5,-4,10,2,10);c.stroke();
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(10,-2,6,4,0,0,Math.PI*2);c.fill();
+    c.fillStyle='rgba(0,0,0,0.15)';c.lineWidth=1.5;c.strokeStyle='rgba(0,0,0,0.15)';
+    for(let i=0;i<2;i++){const t=i/2;c.beginPath();c.moveTo(-2+t*10-1,-2+t*10);c.lineTo(1+t*10,2+t*10);c.stroke();}
+    c.fillStyle='#fff';c.beginPath();c.arc(13,-5,2,0,Math.PI*2);c.fill();
+    c.fillStyle='#000';c.beginPath();c.arc(13,-5,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='whale') {
+    c.beginPath();c.ellipse(0,0,24,11,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(-24,0);c.lineTo(-34,-9);c.lineTo(-30,0);c.lineTo(-34,9);c.closePath();c.fill();
+    c.beginPath();c.moveTo(4,-11);c.quadraticCurveTo(8,-18,12,-11);c.closePath();c.fill();
+    c.fillStyle='#dff0ff';c.beginPath();c.ellipse(4,6,16,5,0.1,0,Math.PI*2);c.fill();
+    c.strokeStyle='rgba(90,140,180,0.4)';c.lineWidth=1;for(let i=0;i<3;i++){c.beginPath();c.moveTo(-4+i*5,3);c.lineTo(-2+i*5,8);c.stroke();}
+    c.strokeStyle='#aaddff';c.lineWidth=1;c.beginPath();c.moveTo(16,-9);c.lineTo(14,-18);c.stroke();c.beginPath();c.moveTo(16,-9);c.lineTo(18,-17);c.stroke();
+    c.fillStyle='#fff';c.beginPath();c.arc(18,-1,3,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(18,-1,1.5,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='anglerfish') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,2,16,11,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#0d060f';c.beginPath();c.moveTo(-8,8);c.lineTo(14,8);c.lineTo(16,13);c.lineTo(-10,14);c.closePath();c.fill();
+    c.fillStyle='#f0f0e8';for(let i=0;i<4;i++){c.beginPath();c.moveTo(-4+i*4,8);c.lineTo(-2+i*4,13);c.lineTo(i*4,13);c.closePath();c.fill();}
+    c.strokeStyle='#888';c.lineWidth=1;c.beginPath();c.moveTo(6,-8);c.bezierCurveTo(12,-16,18,-18,20,-14);c.stroke();
+    c.fillStyle='#ffe066';c.beginPath();c.arc(20,-14,3,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(10,-3,3,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='kraken') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,-3,16,13,0,0,Math.PI*2);c.fill();
+    c.strokeStyle=fish.color;c.lineWidth=3;c.lineCap='round';
+    for(let i=0;i<6;i++){const ang=(i/5-0.5)*Math.PI;c.beginPath();c.moveTo(0,8);c.bezierCurveTo(Math.cos(ang)*8,12,Math.cos(ang)*22,Math.sin(ang)*8+18,Math.cos(ang)*26,Math.sin(ang)*10+18);c.stroke();}
+    c.fillStyle='#fff';c.beginPath();c.arc(-5,-6,4,0,Math.PI*2);c.fill();c.beginPath();c.arc(5,-6,4,0,Math.PI*2);c.fill();
+    c.fillStyle='#cc0000';c.beginPath();c.arc(-5,-6,2.5,0,Math.PI*2);c.fill();c.beginPath();c.arc(5,-6,2.5,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='catfish') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,0,16,7,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.ellipse(14,0,8,6,0,0,Math.PI*2);c.fill();
+    c.strokeStyle=fish.color+'cc';c.lineWidth=1.5;
+    c.beginPath();c.moveTo(20,-2);c.lineTo(28,-6);c.stroke();c.beginPath();c.moveTo(20,2);c.lineTo(28,6);c.stroke();
+    c.fillStyle='#fff';c.fillRect(16,-4,4,3);c.fillStyle=fish.color;c.fillRect(16,-4,4,1.5);
+  } else if (fish.shape==='piranha') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,0,14,11,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#ff2222';c.fillRect(-12,1,24,2);
+    c.fillStyle='#1a0808';c.beginPath();c.moveTo(-6,5);c.lineTo(10,5);c.lineTo(12,10);c.lineTo(-8,11);c.closePath();c.fill();
+    c.fillStyle='#fff';for(let i=0;i<4;i++){c.beginPath();c.moveTo(-4+i*3,5);c.lineTo(-2+i*3,9);c.lineTo(i*3,5);c.closePath();c.fill();}
+    c.fillStyle='#fff';c.beginPath();c.arc(7,-2,3,0,Math.PI*2);c.fill();c.fillStyle='#f00';c.beginPath();c.arc(7,-2,2,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='carp') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,0,16,12,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#e8a0a0';c.beginPath();c.ellipse(14,1,3,2,0,0,Math.PI*2);c.fill();
+    c.strokeStyle=fish.color+'88';c.lineWidth=1;
+    for(let i=0;i<6;i++){c.beginPath();c.arc(-6+i*4,-2,4,0,Math.PI*2);c.stroke();}
+    c.fillStyle='#555';c.fillRect(14,4,1,6);c.beginPath();c.arc(14.5,3,2.5,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(10,-3,2.5,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='crayfish') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(4,0,16,8,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(-12,0);c.lineTo(-20,-8);c.lineTo(-18,0);c.lineTo(-20,8);c.closePath();c.fill();
+    c.beginPath();c.moveTo(18,-2);c.lineTo(26,-8);c.lineTo(28,-4);c.lineTo(24,2);c.lineTo(18,2);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(16,-8,2,0,Math.PI*2);c.fill();c.beginPath();c.arc(20,-8,2,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='sturgeon') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,0,20,7,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(18,-2);c.lineTo(32,0);c.lineTo(18,2);c.closePath();c.fill();
+    c.fillStyle='#8888aa';for(let i=0;i<4;i++){c.beginPath();c.moveTo(-10+i*7,-7);c.lineTo(-7+i*7,-12);c.lineTo(-4+i*7,-7);c.closePath();c.fill();}
+    c.fillStyle='#ff4444';c.beginPath();c.arc(2,-7,3,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(14,-1,2,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='salmon') {
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,0,17,8,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.ellipse(5,-5,10,6,0.4,0,Math.PI*2);c.fill();
+    c.fillStyle='#f0d0b8';c.beginPath();c.ellipse(2,4,11,4,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#8b3a1a';for(let i=0;i<4;i++){c.beginPath();c.arc(-6+i*6,-2,1.5,0,Math.PI*2);c.fill();}
+    c.fillStyle='#fff';c.beginPath();c.arc(13,-2,2.5,0,Math.PI*2);c.fill();c.fillStyle='#222';c.beginPath();c.arc(13,-2,1.5,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='clownfish') {
+    c.beginPath();c.ellipse(0,0,13,9,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.moveTo(-3,-9);c.lineTo(-1,9);c.lineTo(2,9);c.lineTo(4,-9);c.closePath();c.fill();
+    c.beginPath();c.moveTo(7,-8);c.lineTo(8,8);c.lineTo(10,8);c.lineTo(11,-8);c.closePath();c.fill();
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(-13,0);c.lineTo(-19,-6);c.lineTo(-17,0);c.lineTo(-19,6);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(9,-2,2,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(9,-2,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='jellycold') {
+    c.beginPath();c.ellipse(0,-5,12,8,0,0,Math.PI);c.fill();
+    c.fillStyle='rgba(255,255,255,0.3)';c.beginPath();c.ellipse(-3,-7,4,3,0.3,0,Math.PI*2);c.fill();
+    c.strokeStyle=fish.color;c.lineWidth=1.5;c.lineCap='round';
+    for(let i=-8;i<=8;i+=4){c.beginPath();c.moveTo(i,3);c.lineTo(i,14);c.stroke();}
+  } else if (fish.shape==='moray') {
+    c.strokeStyle=fish.color;c.lineWidth=7;c.lineCap='round';
+    c.beginPath();c.moveTo(-22,0);c.bezierCurveTo(-12,-10,2,10,12,-5);c.stroke();
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(15,-4,8,5,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(18,-7,2,0,Math.PI*2);c.fill();c.fillStyle='#333';c.beginPath();c.arc(18,-7,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='flyingfish') {
+    c.beginPath();c.ellipse(0,0,16,5,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color+'bb';c.beginPath();c.moveTo(-4,-5);c.lineTo(-16,-15);c.lineTo(4,-5);c.closePath();c.fill();
+    c.beginPath();c.moveTo(-4,5);c.lineTo(-10,10);c.lineTo(2,5);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(12,-1,2,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(12,-1,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='flatfish') {
+    c.beginPath();c.ellipse(0,3,18,8,-0.1,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(11,-1,2,0,Math.PI*2);c.fill();c.beginPath();c.arc(13,-4,2,0,Math.PI*2);c.fill();
+    c.fillStyle='#333';c.beginPath();c.arc(11,-1,1,0,Math.PI*2);c.fill();c.beginPath();c.arc(13,-4,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='rockfish') {
+    c.beginPath();c.ellipse(0,0,14,10,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color+'aa';for(let i=0;i<3;i++){c.beginPath();c.moveTo(-6+i*6,-10);c.lineTo(-3+i*6,-16);c.lineTo(0+i*6,-10);c.closePath();c.fill();}
+    c.fillStyle='#fff';c.beginPath();c.arc(9,-2,3,0,Math.PI*2);c.fill();c.fillStyle='#333';c.beginPath();c.arc(9,-2,2,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='sunfish') {
+    c.beginPath();c.ellipse(0,0,14,16,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(0,-16);c.lineTo(-4,-22);c.lineTo(4,-22);c.closePath();c.fill();
+    c.beginPath();c.moveTo(0,16);c.lineTo(-4,22);c.lineTo(4,22);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(6,-3,3,0,Math.PI*2);c.fill();c.fillStyle='#333';c.beginPath();c.arc(6,-3,1.5,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='mermaid') {
+    c.fillStyle='#f0c8a0';c.beginPath();c.ellipse(0,-8,6,10,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(0,6,6,12,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color+'99';c.beginPath();c.moveTo(-6,14);c.lineTo(-10,20);c.lineTo(-2,18);c.closePath();c.fill();
+    c.beginPath();c.moveTo(6,14);c.lineTo(10,20);c.lineTo(2,18);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(-2,-9,1.5,0,Math.PI*2);c.fill();c.beginPath();c.arc(2,-9,1.5,0,Math.PI*2);c.fill();
+    c.fillStyle='#5a8aaa';c.beginPath();c.arc(-2,-9,1,0,Math.PI*2);c.fill();c.beginPath();c.arc(2,-9,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='rainbowdolphin') {
+    c.beginPath();c.ellipse(0,0,22,10,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(-22,0);c.lineTo(-30,-8);c.lineTo(-28,0);c.lineTo(-30,8);c.closePath();c.fill();
+    c.fillStyle='rgba(255,255,255,0.7)';c.beginPath();c.ellipse(2,5,14,5,0,0,Math.PI*2);c.fill();
+    const rb=['#f44','#f94','#ee4','#4c4','#48f','#94f'];
+    for(let i=0;i<6;i++){c.strokeStyle=rb[i];c.lineWidth=1.5;c.beginPath();c.moveTo(-8+i*3,-10-(i*1.5));c.bezierCurveTo(-4+i*3,-16-(i*1.5),4+i*3,-16-(i*1.5),8+i*3,-10-(i*1.5));c.stroke();}
+    c.fillStyle='#fff';c.beginPath();c.arc(16,-2,3,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(16,-2,1.5,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='spongebob') {
+    c.fillStyle=fish.color;c.fillRect(-12,-16,24,26);
+    c.strokeStyle='#c8a020';c.lineWidth=1.5;c.strokeRect(-12,-16,24,26);
+    c.fillStyle='#fff';c.fillRect(-8,-14,6,6);c.fillRect(2,-14,6,6);
+    c.fillStyle='#4488ff';c.fillRect(-6,-12,3,3);c.fillRect(4,-12,3,3);
+    c.fillStyle='#000';c.fillRect(-5,-11,1,2);c.fillRect(5,-11,1,2);
+    c.fillStyle='rgba(200,150,20,0.3)';for(let i=0;i<4;i++)c.fillRect(-8+i*5,-6,3,3);
+  } else if (fish.shape==='patrick') {
+    c.fillStyle='#f4846e';
+    c.beginPath();
+    for(let i=0;i<10;i++){const ang=(i/10)*Math.PI*2-Math.PI/2,r=i%2===0?19:8;if(i===0)c.moveTo(Math.cos(ang)*r,Math.sin(ang)*r);else c.lineTo(Math.cos(ang)*r,Math.sin(ang)*r);}
+    c.closePath();c.fill();
+    c.fillStyle='#4a9a28';c.beginPath();c.moveTo(-9,6);c.lineTo(9,6);c.lineTo(7,16);c.lineTo(-7,16);c.closePath();c.fill();
+    c.fillStyle='#8040bb';c.beginPath();c.arc(-3,11,2.5,0,Math.PI*2);c.fill();c.beginPath();c.arc(3,11,2.5,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(-4,-3,5,0,Math.PI*2);c.fill();c.beginPath();c.arc(4,-3,5,0,Math.PI*2);c.fill();
+    c.fillStyle='#111';c.beginPath();c.arc(-3,-2,3,0,Math.PI*2);c.fill();c.beginPath();c.arc(5,-2,3,0,Math.PI*2);c.fill();
+    c.fillStyle='#cc1818';c.beginPath();c.moveTo(-6,4);c.quadraticCurveTo(0,12,6,4);c.closePath();c.fill();
+    c.fillStyle='#fff';c.fillRect(-5,4,3,3);c.fillRect(-1,4,3,3);c.fillRect(3,4,3,3);
+  } else if (fish.shape==='bluewhale') {
+    c.beginPath();c.ellipse(0,0,30,13,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(-30,0);c.lineTo(-42,-12);c.lineTo(-38,0);c.lineTo(-42,12);c.closePath();c.fill();
+    c.fillStyle='#4a6a9a';c.beginPath();c.ellipse(2,7,20,6,0.1,0,Math.PI*2);c.fill();
+    c.fillStyle='#88ccff';c.strokeStyle='#88ccff';c.lineWidth=1.5;
+    c.beginPath();c.moveTo(22,-13);c.lineTo(20,-24);c.stroke();c.beginPath();c.moveTo(22,-13);c.lineTo(24,-22);c.stroke();
+    c.fillStyle='#fff';c.beginPath();c.arc(26,1,3.5,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(26,1,1.5,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='plainbass') {
+    c.beginPath();c.ellipse(0,0,14,8,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color+'cc';c.beginPath();c.moveTo(-3,-8);c.lineTo(1,-13);c.lineTo(5,-8);c.closePath();c.fill();
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(-14,0);c.lineTo(-20,-6);c.lineTo(-18,0);c.lineTo(-20,6);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(10,-1,2,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(10,-1,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='bluegill') {
+    c.beginPath();c.ellipse(0,0,13,10,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#44aaff';c.beginPath();c.ellipse(-11,1,5,4,0,0,Math.PI*2);c.fill();
+    c.beginPath();c.moveTo(-1,-10);c.lineTo(2,-15);c.lineTo(5,-10);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(9,-1,2,0,Math.PI*2);c.fill();c.fillStyle='#333';c.beginPath();c.arc(9,-1,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='minnow') {
+    c.beginPath();c.ellipse(0,0,11,5,0,0,Math.PI*2);c.fill();
+    c.strokeStyle='rgba(100,150,100,0.5)';c.lineWidth=0.8;c.beginPath();c.moveTo(-11,0);c.lineTo(11,0);c.stroke();
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(-11,0);c.lineTo(-16,-4);c.lineTo(-14,0);c.lineTo(-16,4);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(8,-1,1.5,0,Math.PI*2);c.fill();c.fillStyle='#000';c.beginPath();c.arc(8,-1,0.8,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='mullet') {
+    c.beginPath();c.ellipse(0,0,16,7,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color+'cc';c.beginPath();c.moveTo(-2,-7);c.lineTo(2,-12);c.lineTo(6,-7);c.closePath();c.fill();
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(-16,0);c.lineTo(-22,-6);c.lineTo(-20,0);c.lineTo(-22,6);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(12,-1,2,0,Math.PI*2);c.fill();c.fillStyle='#333';c.beginPath();c.arc(12,-1,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='goldfish') {
+    c.beginPath();c.ellipse(0,0,10,7,0,0,Math.PI*2);c.fill();
+    c.fillStyle=fish.color+'cc';c.beginPath();c.moveTo(-10,0);c.lineTo(-16,-7);c.lineTo(-12,-3);c.lineTo(-16,7);c.closePath();c.fill();
+    c.beginPath();c.moveTo(-3,-7);c.lineTo(-5,-12);c.lineTo(1,-7);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(8,-1,2,0,Math.PI*2);c.fill();c.fillStyle='#333';c.beginPath();c.arc(8,-1,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='trout') {
+    c.beginPath();c.ellipse(0,0,16,7,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#8b4560';for(let i=0;i<5;i++){c.beginPath();c.arc(-8+i*4,-2+Math.sin(i)*2,1.5,0,Math.PI*2);c.fill();}
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(-16,0);c.lineTo(-22,-6);c.lineTo(-20,0);c.lineTo(-22,6);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(12,-1,2,0,Math.PI*2);c.fill();c.fillStyle='#333';c.beginPath();c.arc(12,-1,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='snakehead') {
+    c.beginPath();c.ellipse(0,0,17,6,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#222';c.beginPath();c.moveTo(14,-3);c.lineTo(22,-2);c.lineTo(22,2);c.lineTo(14,3);c.closePath();c.fill();
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(-17,0);c.lineTo(-24,-6);c.lineTo(-22,0);c.lineTo(-24,6);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(17,-4,2,0,Math.PI*2);c.fill();c.fillStyle='#e00';c.beginPath();c.arc(17,-4,1,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='breadfishred') {
+    c.fillStyle='#c8721a';
+    c.beginPath();c.moveTo(16,0);c.bezierCurveTo(16,-11,2,-14,-6,-9);c.bezierCurveTo(-14,-6,-14,6,-6,9);c.bezierCurveTo(2,14,16,11,16,0);c.closePath();c.fill();
+    c.beginPath();c.moveTo(-6,-6);c.lineTo(-17,-13);c.lineTo(-14,-3);c.lineTo(-17,11);c.lineTo(-6,6);c.closePath();c.fill();
+    c.strokeStyle='#8a4410';c.lineWidth=1;
+    for(let x=-10;x<=14;x+=5){c.beginPath();c.moveTo(x,-13);c.lineTo(x,13);c.stroke();}
+    for(let y=-10;y<=10;y+=5){c.beginPath();c.moveTo(-14,y);c.lineTo(14,y);c.stroke();}
+    c.fillStyle='#6a1a1a';c.beginPath();c.arc(13,0,3.5,0,Math.PI*2);c.fill();
+    c.fillStyle='#000';c.beginPath();c.arc(12,-5,2,0,Math.PI*2);c.fill();c.fillStyle='#fff';c.beginPath();c.arc(13,-6,0.8,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='breadfishcream') {
+    c.fillStyle='#e8a030';
+    c.beginPath();c.moveTo(16,0);c.bezierCurveTo(16,-11,2,-14,-6,-9);c.bezierCurveTo(-14,-6,-14,6,-6,9);c.bezierCurveTo(2,14,16,11,16,0);c.closePath();c.fill();
+    c.beginPath();c.moveTo(-6,-6);c.lineTo(-17,-13);c.lineTo(-14,-3);c.lineTo(-17,11);c.lineTo(-6,6);c.closePath();c.fill();
+    c.strokeStyle='#b07020';c.lineWidth=1;
+    for(let x=-10;x<=14;x+=5){c.beginPath();c.moveTo(x,-13);c.lineTo(x,13);c.stroke();}
+    for(let y=-10;y<=10;y+=5){c.beginPath();c.moveTo(-14,y);c.lineTo(14,y);c.stroke();}
+    c.fillStyle='#ffe050';c.beginPath();c.arc(14,0,4,0,Math.PI*2);c.fill();
+    c.fillStyle='#000';c.beginPath();c.arc(12,-5,2,0,Math.PI*2);c.fill();c.fillStyle='#fff';c.beginPath();c.arc(13,-6,0.8,0,Math.PI*2);c.fill();
+  } else if (fish.shape==='giantmudfish') {
+    c.strokeStyle=fish.color;c.lineWidth=10;c.lineCap='round';
+    c.beginPath();c.moveTo(-18,0);c.bezierCurveTo(-10,-8,2,9,14,-3);c.stroke();
+    c.fillStyle=fish.color;c.beginPath();c.ellipse(17,-2,9,6,0,0,Math.PI*2);c.fill();
+    c.fillStyle='#fff';c.fillRect(17,-5,4,3);c.fillStyle='#000';c.fillRect(18,-4,2,2);
+  } else if (fish.shape==='goldencarp') {
+    c.beginPath();c.ellipse(0,0,18,11,0,0,Math.PI*2);c.fill();
+    c.fillStyle='rgba(255,230,50,0.5)';c.beginPath();c.ellipse(0,0,18,11,0,0,Math.PI*2);c.fill();
+    c.shadowColor='#ffdd00';c.shadowBlur=8;
+    c.strokeStyle='#ffe500';c.lineWidth=1.5;c.strokeRect(-18,-11,36,22);c.shadowBlur=0;
+    c.fillStyle=fish.color;c.beginPath();c.moveTo(-18,0);c.lineTo(-26,-9);c.lineTo(-22,0);c.lineTo(-26,9);c.closePath();c.fill();
+    c.fillStyle='#fff';c.beginPath();c.arc(10,-2,2.5,0,Math.PI*2);c.fill();c.fillStyle='#222';c.beginPath();c.arc(10,-2,1.5,0,Math.PI*2);c.fill();
+  }
+}
+
+// ========== HUD / 패널 ==========
+const hudGold=document.getElementById('hud-gold'), hudDepth=document.getElementById('hud-depth');
+const hudInv=document.getElementById('hud-inv'), hudState=document.getElementById('hud-state');
+const hudRod=document.getElementById('hud-rod');
+const STATE_LABEL={IDLE:'대기',CASTING:'캐스팅',HOOKED:'걸림!',REELING:'회수'};
+function updateHUD() {
+  hudGold.textContent=Math.floor(state.gold);
+  hudDepth.textContent=Math.floor(Math.max(0,line.hookY-SURFACE_Y));
+  hudInv.textContent=state.inventory.length+'/'+inventoryCap();
+  hudState.textContent=STATE_LABEL[line.state];
+  hudRod.textContent='Lv.'+state.upgrades.rod;
+}
+const hintFlash={text:'',timer:0};
+function flashHint(t){hintFlash.text=t;hintFlash.timer=3;}
+
+let currentTab='sea';
+function switchTab(t) {
+  if (t==='sea'||t==='fresh') harborMode = false;
+  currentTab=t;
+  const prevLoc=currentLoc;
+  if (t==='sea'||t==='fresh') currentLoc=t;
+  if (currentLoc!==prevLoc) { fishes.length=0; for(let i=0;i<6;i++) spawnFish(); }
+  ['aquarium','encyclopedia','shop'].forEach(p=>{document.getElementById('panel-'+p).classList.toggle('active',t===p);});
+  renderPanels();
+}
+function backToHarbor() {
+  ['aquarium','encyclopedia','shop'].forEach(p=>document.getElementById('panel-'+p).classList.remove('active'));
+  currentTab=currentLoc;
+}
+
+function makeFishCard(inst, actions) {
+  const fish=FISH_BY_ID[inst.fishId]; if(!fish) return document.createElement('div');
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML=`<canvas width="48" height="48"></canvas><span class="name">${fish.name}</span><span class="meta">T${fish.tier} · ${fish.price}G · ${fish.loc==='sea'?'🌊':'🌿'}</span><span class="flavor">${fish.flavor}</span>`;
+  const cv=card.querySelector('canvas'); const cctx=cv.getContext('2d'); cctx.imageSmoothingEnabled=false;
+  cctx.clearRect(0,0,48,48); cctx.save(); cctx.translate(24,28); cctx.scale(1.2,1.2);
+  miniShape(cctx,fish); cctx.restore();
+  for (const act of actions) {
+    const b=document.createElement('button'); b.textContent=act.label;
+    if(act.danger)b.className='danger'; if(act.disabled)b.disabled=true;
+    b.addEventListener('click',act.fn); card.appendChild(b);
+  }
+  return card;
+}
+
+function makeEncCard(fish, discovered) {
+  const card=document.createElement('div'); card.className='card';
+  card.innerHTML=`<canvas width="48" height="48"></canvas><span class="name">${fish.loc==='sea'?'🌊':'🌿'} ${fish.name}</span><span class="meta">${discovered?'발견됨':'미발견'}</span><span class="flavor">${discovered?fish.flavor:'아직 못 잡았어요.'}</span>`;
+  const cv=card.querySelector('canvas'); const cctx=cv.getContext('2d'); cctx.imageSmoothingEnabled=false;
+  cctx.clearRect(0,0,48,48); cctx.save(); cctx.translate(24,28); cctx.scale(1.1,1.1);
+  if(discovered){miniShape(cctx,fish);}else{cctx.fillStyle='#333';cctx.beginPath();cctx.arc(0,0,12,0,Math.PI*2);cctx.fill();}
+  cctx.restore(); return card;
+}
+
+function renderPanels() {
+  syncAquariumSwimmers();
+  // 바다 수족관
+  document.getElementById('aqua-sea-count').textContent=state.aquarium_sea.length;
+  document.getElementById('aqua-sea-cap').textContent=seaAquaCap();
+  document.getElementById('aqua-sea-income').textContent=state.aquarium_sea.reduce((s,inst)=>{const f=FISH_BY_ID[inst.fishId];return s+(f?f.price*3.6:0);},0).toFixed(1);
+  const aS=document.getElementById('aqua-sea-list'); aS.innerHTML='';
+  if(!state.aquarium_sea.length) aS.innerHTML='<div class="empty">바다 물고기가 없음.</div>';
+  for(const inst of state.aquarium_sea) {
+    aS.appendChild(makeFishCard(inst,[{label:'인벤으로',fn:()=>{
+      if(state.inventory.length>=inventoryCap()){flashHint('인벤 가득.');return;}
+      state.aquarium_sea=state.aquarium_sea.filter(x=>x.instId!==inst.instId);
+      state.inventory.push(inst); saveState(); renderPanels();
+    }}]));
+  }
+  // 민물 수족관
+  document.getElementById('aqua-fresh-count').textContent=state.aquarium_fresh.length;
+  document.getElementById('aqua-fresh-cap').textContent=freshAquaCap();
+  document.getElementById('aqua-fresh-income').textContent=state.aquarium_fresh.reduce((s,inst)=>{const f=FISH_BY_ID[inst.fishId];return s+(f?f.price*3.6:0);},0).toFixed(1);
+  const aF=document.getElementById('aqua-fresh-list'); aF.innerHTML='';
+  if(!state.aquarium_fresh.length) aF.innerHTML='<div class="empty">민물 물고기가 없음.</div>';
+  for(const inst of state.aquarium_fresh) {
+    aF.appendChild(makeFishCard(inst,[{label:'인벤으로',fn:()=>{
+      if(state.inventory.length>=inventoryCap()){flashHint('인벤 가득.');return;}
+      state.aquarium_fresh=state.aquarium_fresh.filter(x=>x.instId!==inst.instId);
+      state.inventory.push(inst); saveState(); renderPanels();
+    }}]));
+  }
+  // 인벤 → 수족관
+  const aI=document.getElementById('aqua-inv'); aI.innerHTML='';
+  if(!state.inventory.length) aI.innerHTML='<div class="empty">인벤토리 비어있음.</div>';
+  for(const inst of state.inventory) {
+    const fish=FISH_BY_ID[inst.fishId]; if(!fish) continue;
+    const isSea=fish.loc==='sea';
+    const aqua=isSea?state.aquarium_sea:state.aquarium_fresh;
+    const cap=isSea?seaAquaCap():freshAquaCap();
+    aI.appendChild(makeFishCard(inst,[{label:`${isSea?'🌊바다':'🌿민물'} 수족관 배치`, disabled:aqua.length>=cap, fn:()=>{
+      if(aqua.length>=cap) return;
+      if(isSea) state.aquarium_sea.push(inst); else state.aquarium_fresh.push(inst);
+      state.inventory=state.inventory.filter(x=>x.instId!==inst.instId);
+      saveState(); renderPanels();
+    }}]));
+  }
+  // 상점 - 판매
+  const sI=document.getElementById('shop-inv'); sI.innerHTML='';
+  if(!state.inventory.length) sI.innerHTML='<div class="empty">팔 물고기 없음.</div>';
+  for(const inst of state.inventory) {
+    const fish=FISH_BY_ID[inst.fishId]; if(!fish) continue;
+    sI.appendChild(makeFishCard(inst,[{label:`판매 +${fish.price}G`,fn:()=>{
+      state.gold+=fish.price; state.inventory=state.inventory.filter(x=>x.instId!==inst.instId);
+      flashHint(`${fish.name} 판매 완료!`); saveState(); renderPanels();
+    }}]));
+  }
+  // 도감
+  const eL=document.getElementById('encyclopedia-list'); eL.innerHTML='';
+  for(const fish of FISH_DB) eL.appendChild(makeEncCard(fish,state.seenFish.includes(fish.id)));
+  // 업그레이드
+  const sU=document.getElementById('shop-upgrades'); sU.innerHTML='';
+  for(const key of Object.keys(UPGRADES)) {
+    const u=UPGRADES[key], cost=upgradeCost(key), lvl=state.upgrades[key]||0;
+    const card=document.createElement('div'); card.className='card';
+    card.innerHTML=`<span class="name">${u.name} Lv.${lvl}</span><span class="meta">${u.desc}</span><span class="meta">비용 ${cost}G</span>`;
+    const b=document.createElement('button'); b.textContent='업그레이드'; b.disabled=state.gold<cost;
+    b.addEventListener('click',()=>{if(state.gold<cost)return;state.gold-=cost;state.upgrades[key]=(state.upgrades[key]||0)+1;flashHint(`${u.name} 업그레이드!`);saveState();renderPanels();});
+    card.appendChild(b); sU.appendChild(card);
+  }
+}
+
+document.getElementById('btn-reset').addEventListener('click',()=>{if(confirm('정말 모든 진행 초기화?'))resetState();});
+
+// ========== 패시브 수익 ==========
+function tickPassive(dt) {
+  let income=0;
+  for(const inst of [...state.aquarium_sea,...state.aquarium_fresh]) {
+    const fish=FISH_BY_ID[inst.fishId]; if(fish) income+=fish.price*0.001*dt;
+  }
+  state.gold+=income;
+}
+function applyOffline() {
+  const now=Date.now(), dt=Math.min(60*60*4,(now-state.lastTick)/1000);
+  if(dt>5) tickPassive(dt); state.lastTick=now;
+}
+applyOffline();
+
+// ========== 게임 루프 ==========
+let lastT=performance.now(), autoSaveT=0;
+function loop(now) {
+  updateFontScale();
+  const dt=Math.min(0.05,(now-lastT)/1000); lastT=now; gameTime+=dt;
+  if (!harborMode) {
+    if(keys['ArrowLeft']||keys['KeyA']) boat.x-=boatSpeed()*dt;
+    if(keys['ArrowRight']||keys['KeyD']) boat.x+=boatSpeed()*dt;
+    boat.x=Math.max(50,Math.min(W-50,boat.x));
+  }
+  updateHarborPlayer(dt);
+  updateFishes(dt); updateLine(dt); updateWeather(dt); updateAquarium(dt); updateChests(dt); updateFirstCatch(dt); tickPassive(dt);
+  if (!state.freshUnlocked && state.gold >= 10000) { state.freshUnlocked=true; flashHint('🎉 민물 해금! 항구에서 민물 선택 가능'); saveState(); }
+  if(hintFlash.timer>0) hintFlash.timer-=dt;
+  draw(); updateHUD();
+  autoSaveT+=dt; if(autoSaveT>5){autoSaveT=0;saveState();}
+  requestAnimationFrame(loop);
+}
+
+// ========== 브금 ==========
+const bgm = new Audio('Sunset Dock Loop.mp3');
+bgm.loop = true;
+bgm.volume = 0.4;
+let bgmStarted = false;
+let bgmMuted = false;
+
+function startBgm() {
+  if (bgmStarted) return;
+  bgmStarted = true;
+  bgm.play().catch(() => {});
+}
+function toggleMute() {
+  bgmMuted = !bgmMuted;
+  bgm.muted = bgmMuted;
+  document.getElementById('btn-mute').textContent = bgmMuted ? '♪ OFF' : '♪ ON';
+  if (!bgmStarted) startBgm();
+}
+
+window.addEventListener('keydown', startBgm, { once: true });
+window.addEventListener('click', startBgm, { once: true });
+
+canvas.addEventListener('click', e => {
+  if (currentTab !== 'aquarium') return;
+  const rect = canvas.getBoundingClientRect();
+  const cx = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const cy = (e.clientY - rect.top)  * (canvas.height / rect.height);
+  const all = [...swimSea, ...swimFresh];
+  let hit = null, best = 45*45;
+  for (const f of all) {
+    const d2 = (f.x-cx)**2 + (f.y-cy)**2;
+    if (d2 < best) { best=d2; hit=f; }
+  }
+  if (hit) {
+    hit.vx = -Math.sign(hit.vx) * Math.max(Math.abs(hit.vx), 60) * 2.5;
+    hit.t = 0.8;
+    hit.startleTimer = 0.9;
+  }
+});
+
+initWeather();
+for(let i=0;i<6;i++) spawnFish();
+renderPanels();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
