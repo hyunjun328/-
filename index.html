@@ -37,12 +37,7 @@
   .card button.danger:hover { background: #982030; }
   .card button:disabled { background: #201828; color: #4a3858; border-color: #2e2040; cursor: not-allowed; }
   .empty { color: #3a2e48; font-style: italic; padding: 12px; font-size: 9px; }
-  #touch-controls { display:none; position:absolute; bottom:14px; left:0; right:0; pointer-events:none; z-index:20; justify-content:space-between; align-items:flex-end; padding:0 16px; }
-  @media (pointer:coarse) { #touch-controls { display:flex; } }
-  .touch-btn-group { display:flex; gap:12px; pointer-events:all; }
-  .touch-btn { pointer-events:all; width:68px; height:68px; background:rgba(40,20,60,0.55); border:2px solid rgba(140,100,220,0.45); border-radius:50%; color:#e8dfc8; font-size:26px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-family:inherit; -webkit-tap-highlight-color:transparent; user-select:none; touch-action:none; }
-  .touch-btn:active { background:rgba(80,40,120,0.75); }
-  .touch-btn-action { width:84px; height:84px; font-size:36px; background:rgba(60,20,90,0.6); border-color:rgba(180,120,255,0.6); }
+  #stage { -webkit-tap-highlight-color: transparent; }
 </style>
 </head>
 <body>
@@ -57,13 +52,6 @@
   </div>
   <div id="stage">
     <canvas id="game" width="1600" height="900"></canvas>
-    <div id="touch-controls">
-      <div class="touch-btn-group">
-        <button id="touch-left" class="touch-btn">◀</button>
-        <button id="touch-right" class="touch-btn">▶</button>
-      </div>
-      <button id="touch-space" class="touch-btn touch-btn-action">●</button>
-    </div>
     <button id="btn-guide" onclick="toggleGuide()" style="display:none;position:absolute;top:8px;right:8px;padding:5px 10px;background:#1c1628;color:#e8c870;border:1px solid #5040a0;cursor:pointer;font-family:inherit;font-size:9px;">? 안내판</button>
     <div class="panel" id="panel-aquarium">
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
@@ -272,7 +260,7 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 let fontScale = 1;
-function updateFontScale() { const cw=canvas.clientWidth||1600; fontScale=Math.min(4.0,Math.max(1.0,1600/cw)); }
+function updateFontScale() { const cw=canvas.clientWidth||1600; fontScale=Math.min(4.0,Math.max(1.5,1600/cw)); }
 function fz(px) { return Math.round(px*fontScale); }
 window.addEventListener('resize', updateFontScale);
 const keys = {};
@@ -289,18 +277,9 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => { keys[e.code]=false; });
 
-function setupTouch() {
-  const bind = (id, code) => {
-    const el = document.getElementById(id); if (!el) return;
-    el.addEventListener('touchstart', e => { e.preventDefault(); startBgm(); keys[code]=true; if(code==='Space') handleSpacePress(); }, {passive:false});
-    el.addEventListener('touchend',   e => { e.preventDefault(); keys[code]=false; }, {passive:false});
-    el.addEventListener('touchcancel',() => { keys[code]=false; });
-  };
-  bind('touch-left',  'ArrowLeft');
-  bind('touch-right', 'ArrowRight');
-  bind('touch-space', 'Space');
-}
-setupTouch();
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault(); startBgm(); handleSpacePress();
+}, {passive:false});
 
 // ========== 엔티티 ==========
 const boat = { x:W/2, y:SURFACE_Y-30, speed:280 };
